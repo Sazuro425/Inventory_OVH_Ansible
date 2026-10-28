@@ -1,0 +1,82 @@
+# Inventaire d'infrastructure OVH -> Proxmox
+# Aucun secret ici : les valeurs "env:NOM" sont lues dans l'environnement.
+
+ovh:
+  endpoint: ovh-eu
+  # laisser tel quel pour utiliser ~/.ovh.conf, ou definir
+  # OVH_APPLICATION_KEY / OVH_APPLICATION_SECRET / OVH_CONSUMER_KEY
+  config: ~/.ovh.conf
+
+pve:
+  port: 8006
+  # CA concatenees des clusters, construites par --collect-ca
+  # (laisse vide tant qu'on epingle les certificats)
+  ca_bundle:
+  # epingle le certificat de chaque noeud a la premiere connexion
+  pin_certs: true
+  pin_dir: pinned
+  default_token: "env:PVE_TOKEN"
+  # token different pour un hote precis :
+  tokens: {}
+  #  ns1234.ip-1-2-3.eu: "env:PVE_TOKEN_CLUSTER2"
+  # dedies OVH qui ne sont pas des hyperviseurs (evite un sondage inutile
+  # et une ligne dans pve_unreachable)
+  skip: []
+
+  # Pour eprouver la collecte sur une partie du parc avant de la lancer en
+  # entier. Motifs type glob, l'emporte sur skip. Vide = tout le parc.
+  # (aussi en ligne de commande : --seulement 'ns1234*,ns5678*')
+  seulement: []
+  detail: true
+
+cache:
+  # Ansible relance l'inventaire a chaque playbook : sans cache, chaque
+  # commande refait le tour de tous les clusters
+  path: .infra_cache.json
+  ttl: 900
+
+ansible:
+  # variables appliquees a toutes les machines de l'inventaire
+  defaults: {}
+  #  ansible_user: ansible
+
+  # Comptes sur les machines cibles (pas sur le bastion)
+  comptes:
+    node: root
+    vm: ansible
+
+  # The Bastion (ovh/the-bastion), via the-bastion-ansible-wrapper.
+  # bastion_user n'est VOLONTAIREMENT pas ici : les comptes sont nominatifs et
+  # l'inventaire est prioritaire sur l'environnement. Chacun definit son propre
+  # BASTION_USER, ou son /etc/ovh/bastion/config.yml.
+  bastion:
+    host: bastion.exemple.net
+    port: 22
+    # groupe The Bastion qui porte les acces ; sert a --bastion-commands
+    groupe: infra-prod
+    # mettre a false pour generer un inventaire sans bastion
+    actif: false
+
+    # Machines qui n'ont pas vocation a passer par le bastion : elles sont
+    # comptees "hors perimetre", jamais signalees comme un acces manquant.
+    # Un rapport qui melange "oublie" et "hors sujet" cesse d'etre lu.
+    hors_perimetre:
+      # motifs sur l'OS remonte par Proxmox (insensible a la casse)
+      os: ["win*"]
+      # etiquettes Proxmox, pour les exceptions que la regle ne couvre pas
+      tags: ["no-bastion"]
+      # noms ou IP en dur, en dernier recours
+      hotes: []
+
+db:
+  host: 127.0.0.1
+  port: 3306
+  user: inventory
+  # jamais le mot de passe ici : "env:NOM" le lit dans l'environnement
+  password: "env:INVENTORY_DB_PASSWORD"
+  name: inventory
+  # cree la base et les tables si elles manquent
+  # (demande les droits DDL, cf. sql/setup_db.sql)
+  auto_schema: true
+  # nombre de snapshots conserves (vide = tout garder)
+  keep_runs: 200

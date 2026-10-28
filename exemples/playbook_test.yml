@@ -1,0 +1,29 @@
+---
+# Playbook de validation du client : il ne touche a rien de reel.
+# connection: local fait executer les taches sur le poste lui-meme, une fois
+# par hote cible, ce qui permet d'eprouver simulate et run sans joindre les
+# machines fictives de l'inventaire de demonstration.
+- name: Validation du client infra
+  hosts: all
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Montrer ce que l'inventaire porte sur cet hote
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} :
+          {{ pve_tags | default('sans tag') }} ·
+          {{ ovh_datacenter | default('?') }} ·
+          {{ pve_ram_mb | default(0) }} Mo
+
+    - name: Ecrire un fichier temoin
+      # En --check cette tache annonce un changement sans rien ecrire ;
+      # c'est ce qui distingue la simulation de l'execution.
+      ansible.builtin.copy:
+        content: |
+          hote   : {{ inventory_hostname }}
+          tags   : {{ pve_tags | default('') }}
+          cluster: {{ pve_cluster | default('') }}
+        dest: "/tmp/infra-temoin-{{ inventory_hostname }}.txt"
+        mode: "0600"

@@ -1,0 +1,21 @@
+[Unit]
+Description=Collecte horaire de l'inventaire OVH -> Proxmox
+Documentation=file:/opt/inventaire-infra/README.md
+
+[Timer]
+OnCalendar=hourly
+
+# Evite que 30 interrogations d'API partent pile a l'heure ronde, et qu'un
+# parc entier tape OVH en meme temps si tu deploies ailleurs.
+RandomizedDelaySec=5min
+
+# Rattrape le passage manque si la machine etait eteinte
+Persistent=true
+
+# Premiere collecte 2 min apres le demarrage, pour ne pas attendre l'heure
+OnBootSec=2min
+
+Unit=inventaire-collecte.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,51 @@
+[Unit]
+Description=Service web de l'inventaire (API jetons et inventaire)
+Documentation=file:/opt/inventaire-infra/README.md
+After=network.target mariadb.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=inventaire
+Group=inventaire
+WorkingDirectory=/opt/inventaire-infra
+ExecStart=/usr/bin/python3 /opt/inventaire-infra/serveur_web.py \
+          --config /opt/inventaire-infra/infra.yml \
+          --host 127.0.0.1 --port 8080
+
+# Le mot de passe de la base vient du meme fichier que la collecte
+EnvironmentFile=/etc/inventaire-infra.env
+
+Restart=on-failure
+RestartSec=5s
+
+# Durcissement. Le service ne lit que son dossier et ne doit rien y ecrire :
+# il interroge la base, il ne produit aucun fichier.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/inventaire-infra
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# Le service n'ECOUTE que sur 127.0.0.1 (--host), ce qui rend l'en-tete
+# d'identite pose par Apache digne de confiance. Le filtrage ci-dessous
+# restreindrait en plus les connexions SORTANTES : a n'activer que si la base
+# est sur la meme machine, sinon le service ne peut plus joindre MariaDB.
+# IPAddressAllow=localhost
+# IPAddressDeny=any
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=inventaire-web
+
+[Install]
+WantedBy=multi-user.target

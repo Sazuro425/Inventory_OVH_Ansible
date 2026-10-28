@@ -1,0 +1,44 @@
+[Unit]
+Description=Collecte de l'inventaire OVH -> Proxmox
+Documentation=file:/opt/inventaire-infra/README.md
+# Sans reseau, la collecte echouerait immediatement
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=inventaire
+Group=inventaire
+WorkingDirectory=/opt/inventaire-infra
+ExecStart=/opt/inventaire-infra/deploy/collecte.sh
+
+# Une collecte de 30 clusters tient largement dans ce delai ; au-dela, c'est
+# qu'elle est bloquee sur un hote qui ne repond pas.
+TimeoutStartSec=15min
+
+# Les secrets sont lus par le script depuis ce fichier (chmod 600), pas passes
+# en arguments ni definis ici : systemctl show les afficherait.
+Environment=INVENTAIRE_ENV=/etc/inventaire-infra.env
+Environment=INVENTAIRE_LOCK=/run/inventaire-infra.lock
+# Page publiee apres chaque collecte ; commenter pour ne rien publier
+Environment=INVENTAIRE_WEB=/var/www/inventaire/index.html
+
+# Durcissement : le service ne lit que son dossier et n'ecrit que son verrou
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/inventaire-infra /var/www/inventaire
+RuntimeDirectory=inventaire-infra
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=inventaire-collecte
+
+[Install]
+WantedBy=multi-user.target

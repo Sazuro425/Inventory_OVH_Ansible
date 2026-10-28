@@ -1,0 +1,37 @@
+# Configuration Ansible pour passer par The Bastion (ovh/the-bastion).
+#
+# A copier a la racine du depot de playbooks, pas ici : c'est le depot Ansible
+# qui porte le wrapper en sous-module.
+#
+#   git submodule add https://github.com/ovh/the-bastion-ansible-wrapper.git extra/bastion
+#   chmod +x extra/bastion/sshwrapper.py extra/bastion/sftpbastion.sh
+#
+# Chaque operateur declare ensuite SON compte bastion, jamais un compte
+# partage :
+#
+#   export BASTION_USER=evan
+#   export BASTION_HOST=bastion.exemple.net
+#   export BASTION_PORT=22
+#
+# ou, de maniere permanente, dans /etc/ovh/bastion/config.yml :
+#
+#   ---
+#   bastion_host: "bastion.exemple.net"
+#   bastion_port: 22
+#   bastion_user: "evan"
+
+[defaults]
+inventory = ./infra_inventory.py
+host_key_checking = True
+interpreter_python = auto_silent
+
+[ssh_connection]
+# Indispensable : le wrapper remplace le client SSH d'Ansible
+ssh_executable = ./extra/bastion/sshwrapper.py
+
+# SFTP plutot que SCP, deprecie cote OpenSSH
+transfer_method = sftp
+sftp_executable = ./extra/bastion/sftpbastion.sh
+
+# Reduit fortement le nombre de connexions, donc de traces dans le bastion
+pipelining = True

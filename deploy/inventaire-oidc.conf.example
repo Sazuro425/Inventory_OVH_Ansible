@@ -1,0 +1,67 @@
+# Raccordement a Authentik par OpenID Connect (mod_auth_openidc).
+#
+#   sudo apt install libapache2-mod-auth-openidc
+#   sudo a2enmod auth_openidc
+#   sudo mkdir -p /etc/apache2/conf-secrets
+#   sudo cp deploy/inventaire-oidc.conf.example \
+#           /etc/apache2/conf-secrets/inventaire-oidc.conf
+#   sudo chown root:www-data /etc/apache2/conf-secrets/inventaire-oidc.conf
+#   sudo chmod 640 /etc/apache2/conf-secrets/inventaire-oidc.conf
+#
+# Ce fichier contient un secret client : il ne va pas dans un depot.
+# Le vhost l'inclut avec IncludeOptional, donc Apache demarre meme sans lui
+# (on reste alors sur l'authentification basic).
+#
+# ---------------------------------------------------------------------------
+# Cote Authentik, avant de remplir ce fichier
+# ---------------------------------------------------------------------------
+# 1. Applications > Providers > Create > OAuth2/OpenID Provider
+#      Name                  : Inventaire
+#      Authorization flow    : explicit ou implicit consent, au choix
+#      Client type           : Confidential
+#      Redirect URIs         : https://inventaire.exemple.lan/oidc-callback
+#                              (exactement l'OIDCRedirectURI ci-dessous)
+#      Signing key           : la cle par defaut
+#      Scopes                : openid, profile, email
+#                              + "groups" si tu veux filtrer par groupe
+# 2. Applications > Applications > Create
+#      Slug                  : inventaire   (il apparait dans l'URL metadata)
+#      Provider              : celui cree a l'etape 1
+# 3. Relever Client ID et Client Secret dans le provider.
+# ---------------------------------------------------------------------------
+
+# Authentik publie ses metadonnees par application ; <slug> est celui ci-dessus
+OIDCProviderMetadataURL https://authentik.exemple.lan/application/o/inventaire/.well-known/openid-configuration
+
+OIDCClientID     REMPLACER_CLIENT_ID
+OIDCClientSecret REMPLACER_CLIENT_SECRET
+
+# URL interne au module : aucun fichier ne doit exister a cet emplacement,
+# Apache l'intercepte. Elle doit figurer telle quelle dans les Redirect URIs
+# du provider Authentik.
+OIDCRedirectURI https://inventaire.exemple.lan/oidc-callback
+
+# Chiffre les cookies de session du module. A generer une fois :
+#   openssl rand -base64 32
+OIDCCryptoPassphrase REMPLACER_PAR_UNE_CHAINE_ALEATOIRE
+
+OIDCScope "openid profile email"
+
+# Nom lisible plutot qu'un UUID dans les journaux Apache
+OIDCRemoteUserClaim preferred_username
+
+# Session de 8 heures, prolongee tant que l'onglet sert
+OIDCSessionInactivityTimeout 3600
+OIDCSessionMaxDuration 28800
+
+# Cookie de session : HTTPS obligatoire, pas d'acces JavaScript
+OIDCCookiePath /
+OIDCCookieSameSite On
+
+# Pour filtrer par groupe avec "Require claim groups:infra-admins", le claim
+# doit etre present dans l'id_token. Dans Authentik, ajouter le scope "groups"
+# au provider, puis decommenter :
+# OIDCScope "openid profile email groups"
+
+# Deverminage : passer a "debug" temporairement, puis revenir.
+# LogLevel auth_openidc:debug
