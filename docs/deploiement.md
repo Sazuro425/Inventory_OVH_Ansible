@@ -64,9 +64,17 @@ python3 setup_inventory_db.py --db-password '<mdp collecte>'
 python3 setup_inventory_db.py --check        # relit et confirme
 ```
 
-Puis le compte web, en reprenant **a la main** le bloc « Compte du service
-web » de `sql/setup_db.sql`, mot de passe remplace. Tout le fichier
-rejouerait l'`ALTER USER` du compte de collecte.
+Puis le compte web, avec le fichier qui ne contient que lui :
+
+```bash
+# remplacer MOT_DE_PASSE_WEB_A_DEFINIR d'abord
+mariadb -u root -p < sql/setup_db_web.sql
+```
+
+`setup_db_web.sql` ne touche que `inventory_web`, et porte les deux requetes
+de verification. C'est pour cela qu'il existe : rejouer tout `setup_db.sql`
+reposerait le mot de passe du compte de collecte au marqueur du fichier, et
+la collecte ne pourrait plus ouvrir la base.
 
 ### Voie B — tout en SQL
 

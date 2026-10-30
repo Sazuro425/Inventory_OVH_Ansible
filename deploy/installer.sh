@@ -225,8 +225,11 @@ if [[ $AVEC_WEB -eq 1 ]]; then
     || RESTE+=("renseigner $FICHIER_ENV_WEB (mot de passe du compte inventory_web)")
 fi
 RESTE+=("creer la base et le compte : cd $PREFIXE && python3 setup_inventory_db.py --db-password '<mdp>'")
-RESTE+=("creer le compte du service web : mariadb -u root -p < $PREFIXE/sql/setup_db.sql")
-RESTE+=("verifier la separation : les deux requetes en fin de sql/setup_db.sql doivent ne rien renvoyer")
+# setup_db_web.sql et non setup_db.sql : les ALTER USER du second reposeraient
+# le mot de passe du compte de collecte au marqueur du fichier, et la collecte
+# ne pourrait plus ouvrir la base.
+RESTE+=("creer le compte du service web : mariadb -u root -p < $PREFIXE/sql/setup_db_web.sql (apres y avoir mis un mot de passe)")
+RESTE+=("verifier la separation : les deux requetes en fin de setup_db_web.sql doivent ne rien renvoyer")
 RESTE+=("eprouver la collecte : python3 infra_inventory.py --refresh --seulement 'ns1234*' --table")
 RESTE+=("chiffrer les secrets : ./deploy/chiffrer-secrets.sh, puis basculer les unites en LoadCredentialEncrypted")
 RESTE+=("si secrets en base : python3 inventory_cli.py --init-key | systemd-creds encrypt --name=master_key - /etc/inventaire-infra/creds/master_key.cred")
