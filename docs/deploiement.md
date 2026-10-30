@@ -10,6 +10,10 @@ sauvegarde de la base avant l'etape 3 si elle contient deja des snapshots.
 
 Cible : Debian 12+, MariaDB 10.11+, systemd 250+ pour `systemd-creds`.
 
+Les commandes sont ecrites avec `sudo`. Si tu travailles directement en root
+— cas courant sur une VM Debian minimale, ou `sudo` n'est meme pas installe —
+retire-le partout.
+
 ---
 
 ## 1. Installer le code
