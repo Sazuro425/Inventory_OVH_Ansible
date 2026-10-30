@@ -42,6 +42,7 @@ import yaml  # noqa: E402
 from ovh_inventory import OvhClient, OvhError, ENDPOINTS  # noqa: E402
 from ovh_inventory import load_credentials as load_ovh_credentials  # noqa: E402
 import inventory_db  # noqa: E402
+import secrets_infra  # noqa: E402
 from proxmox_inventory import (PveClient, PveError, pin_certificate,  # noqa: E402
                                collect as collect_guests)
 
@@ -103,16 +104,74 @@ def load_config(path):
     return conf
 
 
-def resolve_secret(value):
-    """Permet "env:NOM" pour ne pas ecrire un token en clair dans la config."""
-    if isinstance(value, str) and value.startswith("env:"):
-        return os.environ.get(value[4:])
-    return value
+class ResolveurSecrets:
+    """Developpe les references de la configuration.
+
+    `cred:nom` (systemd) et `env:NOM` (environnement) passent par
+    secrets_infra. `db:nom` lit secret_store, ce qui demande la base **et**
+    la clef maitresse — ouvertes a la demande seulement.
+
+    Cette paresse n'est pas une optimisation : une collecte dont la
+    configuration ne contient aucun `db:` doit continuer de tourner sans
+    base joignable, sans TPM, et sans que `cryptography` soit installe.
+    D'ou l'import a l'interieur de la methode.
+    """
+
+    def __init__(self, conf):
+        self.conf = conf
+        self._conn = None
+        self._cle = None
+
+    def __call__(self, valeur):
+        if not isinstance(valeur, str) or not valeur.startswith("db:"):
+            return secrets_infra.resoudre(valeur)
+        import secret_store
+        if self._conn is None:
+            self._conn = inventory_db.connect(self.conf)
+        if self._cle is None:
+            self._cle = secret_store.charger_cle_maitresse()
+        return secret_store.lire(self._conn, valeur[3:], self._cle)
+
+    def fermer(self):
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
+
+def resolveur(conf):
+    """Le resolveur de cette execution, cree au premier besoin.
+
+    Range dans `conf` plutot que dans une variable globale : la connexion
+    et la clef sont ainsi partagees par tous les appels d'une meme
+    collecte, et trente jetons PVE ne rechargent pas trente fois la clef
+    maitresse.
+    """
+    r = conf.get("_secrets")
+    if r is None:
+        r = conf["_secrets"] = ResolveurSecrets(conf)
+    return r
+
+
+def resolve_secret(value, conf=None):
+    """Developpe "cred:nom", "env:NOM", et "db:nom" si conf est fourni."""
+    if conf is None:
+        return secrets_infra.resoudre(value)
+    return resolveur(conf)(value)
 
 
 def token_for(conf, host):
     tokens = conf["pve"].get("tokens") or {}
-    return resolve_secret(tokens.get(host) or conf["pve"].get("default_token"))
+    reference = tokens.get(host) or conf["pve"].get("default_token")
+    try:
+        return resolve_secret(reference, conf)
+    except RuntimeError as exc:
+        # SecretErreur (clef absente, dechiffrement refuse) et DbError
+        # heritent toutes deux de RuntimeError. Un jeton illisible est fatal
+        # pour cet hote ; le convertir ici evite une trace chez l'appelant,
+        # qui ne traite que OvhError et PveError.
+        raise PveError(
+            "token illisible pour {} ({}) : {}".format(host, reference, exc),
+            fatal=True)
 
 
 # --------------------------------------------------------------------------
@@ -728,6 +787,11 @@ def main():
             except (OvhError, PveError) as exc:
                 log("Erreur : " + str(exc))
                 return 1
+            finally:
+                # les secrets ne servent plus ; si une reference db: a ouvert
+                # une connexion, elle n'a pas a rester en vie pendant le
+                # rendu de l'inventaire
+                resolveur(conf).fermer()
             if data["servers"]:
                 cache_write(conf, data)
             else:

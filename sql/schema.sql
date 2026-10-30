@@ -120,6 +120,36 @@ CREATE TABLE IF NOT EXISTS client_token (
   INDEX idx_token_expire (expire_le)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Secrets chiffres : jetons PVE, clefs OVH. Chiffrement d'enveloppe, la clef
+-- maitresse restant protegee par systemd-creds. Un vidage de cette table ne
+-- donne rien sans elle, et elle n'est lisible que sur la machine de collecte.
+--
+-- Le mot de passe de la base et la clef maitresse elle-meme n'ont pas leur
+-- place ici : il faut le premier pour atteindre la table, et la seconde est
+-- tout l'interet du montage. Ces deux-la restent dans systemd-creds.
+--
+-- Le service web ne doit avoir aucun droit sur cette table : il partage la
+-- base, pas les secrets.
+CREATE TABLE IF NOT EXISTS secret_store (
+  nom         VARCHAR(64)    NOT NULL,
+  version     INT            NOT NULL,
+  nonce       VARBINARY(12)  NOT NULL,
+  chiffre     VARBINARY(512) NOT NULL,
+  cle_version INT            NOT NULL DEFAULT 1,
+  cree_le     DATETIME       NOT NULL,
+  cree_par    VARCHAR(190)   NOT NULL,
+  actif       TINYINT(1)     NOT NULL DEFAULT 1,
+  -- (nom, version) plutot qu'un id auto : deux ecritures concurrentes qui
+  -- calculeraient la meme version se heurtent a la contrainte au lieu de
+  -- s'ecraser l'une l'autre
+  PRIMARY KEY (nom, version),
+  -- la lecture courante fait toujours :
+  --   WHERE nom = ? AND actif = 1 ORDER BY version DESC LIMIT 1
+  INDEX idx_secret_actif (nom, actif, version),
+  -- quelles lignes restent a rechiffrer pendant une rotation de clef
+  INDEX idx_secret_cle (cle_version, actif)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- ---------------------------------------------------------------------------
 -- Migration : ajoute les colonnes manquantes sur une base deja en place.
 -- ADD COLUMN IF NOT EXISTS est idempotent, ce bloc peut etre rejoue.

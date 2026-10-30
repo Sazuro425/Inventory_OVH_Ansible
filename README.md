@@ -658,6 +658,38 @@ La page ne fait aucun appel réseau, ce qui permet une CSP stricte
 (`default-src 'none'`). Le cache est désactivé sur `index.html`, sinon un
 navigateur servirait un inventaire périmé sans prévenir.
 
+### Secrets chiffrés (systemd-creds)
+
+Un fichier d'environnement a deux défauts : il est lisible en clair par root et
+par toute sauvegarde du système, et surtout les secrets finissent dans
+**l'environnement du processus** — donc dans `/proc/<pid>/environ` et dans un
+éventuel vidage mémoire.
+
+```bash
+sudo ./deploy/chiffrer-secrets.sh
+```
+
+Le script lit `/etc/inventaire-infra.env`, chiffre chaque variable séparément
+dans `/etc/inventaire-infra/creds/`, et déplace l'original en `.avant-chiffrement`
+plutôt que de le supprimer — le temps de vérifier que les services démarrent.
+
+Il reste à activer le chargement dans les unités : commenter `EnvironmentFile=`
+et décommenter les lignes `LoadCredentialEncrypted=`, déjà présentes.
+
+systemd dépose alors les secrets dans un tmpfs que **seul ce service** peut
+lire. Les scripts les y cherchent avant l'environnement, qui reste accepté en
+repli pour les lancements manuels.
+
+Avec un TPM, la clé ne quitte pas la puce et les fichiers chiffrés sont
+inutilisables sur une autre machine ; sans TPM, systemd se rabat sur une clé
+hôte dans `/var/lib/systemd/`. Dans les deux cas, ce qui change réellement :
+une sauvegarde, un snapshot ou un disque récupéré ne contiennent plus rien
+d'exploitable. Contre un attaquant déjà root sur la machine, rien ne protège —
+le service doit bien obtenir le secret en clair à un moment.
+
+Dans `infra.yml`, les références acceptent les deux formes : `env:NOM` pour une
+variable, `cred:nom` pour un secret systemd.
+
 ### Rétention
 
 `db.keep_runs` dans `infra.yml` (200 par défaut) limite le nombre de snapshots

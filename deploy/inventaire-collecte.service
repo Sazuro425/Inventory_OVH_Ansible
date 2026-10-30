@@ -16,9 +16,32 @@ ExecStart=/opt/inventaire-infra/deploy/collecte.sh
 # qu'elle est bloquee sur un hote qui ne repond pas.
 TimeoutStartSec=15min
 
-# Les secrets sont lus par le script depuis ce fichier (chmod 600), pas passes
-# en arguments ni definis ici : systemctl show les afficherait.
+# Les secrets ne sont jamais passes en arguments ni definis ici : systemctl
+# show les afficherait.
 Environment=INVENTAIRE_ENV=/etc/inventaire-infra.env
+# --- Secrets ---------------------------------------------------------------
+# Deux facons, au choix.
+#
+# A. Fichier d'environnement (simple, mais les secrets se retrouvent dans
+#    l'environnement du processus, donc lisibles dans /proc/<pid>/environ) :
+EnvironmentFile=-/etc/inventaire-infra.env
+#
+# B. systemd-creds (recommande). Lancer deploy/chiffrer-secrets.sh, puis
+#    commenter la ligne ci-dessus et decommenter celles-ci. Les secrets sont
+#    alors deposes dans un tmpfs que seul ce service peut lire, et n'entrent
+#    jamais dans son environnement.
+#LoadCredentialEncrypted=ovh_application_key:/etc/inventaire-infra/creds/ovh_application_key.cred
+#LoadCredentialEncrypted=ovh_application_secret:/etc/inventaire-infra/creds/ovh_application_secret.cred
+#LoadCredentialEncrypted=ovh_consumer_key:/etc/inventaire-infra/creds/ovh_consumer_key.cred
+#LoadCredentialEncrypted=pve_token:/etc/inventaire-infra/creds/pve_token.cred
+#LoadCredentialEncrypted=inventory_db_password:/etc/inventaire-infra/creds/inventory_db_password.cred
+#
+# Clef maitresse du chiffrement d'enveloppe : elle seule dechiffre les
+# secrets stockes dans secret_store. Elle n'a sa place QUE dans cette unite.
+# Le service web touche la meme base ; s'il portait cette clef, un defaut
+# dans le service expose derriere Apache donnerait tous les jetons PVE.
+#LoadCredentialEncrypted=master_key:/etc/inventaire-infra/creds/master_key.cred
+
 Environment=INVENTAIRE_LOCK=/run/inventaire-infra.lock
 # Page publiee apres chaque collecte ; commenter pour ne rien publier
 Environment=INVENTAIRE_WEB=/var/www/inventaire/index.html

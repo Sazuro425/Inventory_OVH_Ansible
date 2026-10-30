@@ -13,8 +13,39 @@ ExecStart=/usr/bin/python3 /opt/inventaire-infra/serveur_web.py \
           --config /opt/inventaire-infra/infra.yml \
           --host 127.0.0.1 --port 8080
 
-# Le mot de passe de la base vient du meme fichier que la collecte
-EnvironmentFile=/etc/inventaire-infra.env
+# Ce service se connecte a la base sous son propre compte, qui n'a aucun
+# droit sur secret_store (voir sql/setup_db.sql). Le nom du compte n'est pas
+# un secret, il peut rester en clair ici.
+Environment=INVENTORY_DB_USER=inventory_web
+
+# --- Secrets ---------------------------------------------------------------
+# Ce service ne doit porter QUE le mot de passe de sa base. Ni les clefs OVH,
+# ni les jetons PVE, ni la clef maitresse : il ne s'en sert pas, et c'est lui
+# qui est joignable depuis le reseau a travers Apache.
+#
+# Deux facons, au choix.
+#
+# A. Fichier d'environnement dedie — distinct de celui de la collecte, qui
+#    contient tous les autres secrets. Les valeurs se retrouvent dans
+#    l'environnement du processus, donc lisibles dans /proc/<pid>/environ.
+EnvironmentFile=-/etc/inventaire-infra-web.env
+#
+# B. systemd-creds (recommande). Lancer deploy/chiffrer-secrets.sh, puis
+#    commenter la ligne ci-dessus et decommenter celle-ci. Le secret est
+#    alors depose dans un tmpfs que seul ce service peut lire, et n'entre
+#    jamais dans son environnement.
+#
+#        ./deploy/chiffrer-secrets.sh \
+#            --source /etc/inventaire-infra-web.env \
+#            --dest   /etc/inventaire-infra/creds-web
+#
+#    Un dossier distinct, et non un prefixe de nom : le nom du credential
+#    (a gauche du deux-points) est celui que le code cherche, et il doit
+#    rester inventory_db_password dans les deux services. C'est le chemin qui
+#    les differencie, et chaque unite ne lit que le sien.
+#LoadCredentialEncrypted=inventory_db_password:/etc/inventaire-infra/creds-web/inventory_db_password.cred
+#LoadCredentialEncrypted=inventory_db_user:/etc/inventaire-infra/creds-web/inventory_db_user.cred
+
 
 Restart=on-failure
 RestartSec=5s

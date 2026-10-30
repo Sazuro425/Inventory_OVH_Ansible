@@ -40,6 +40,8 @@ from pathlib import Path
 
 import requests
 
+import secrets_infra
+
 ENDPOINTS = {
     # api.ovh.com est l'alias qui repond correctement ; eu.api.ovh.com sert un
     # certificat auto-signe depuis certains reseaux (voir --endpoint ovh-eu-alt).
@@ -188,7 +190,10 @@ def load_credentials(args):
             conf = dict(parser.items(section))
 
     def pick(env, key):
-        return os.environ.get(env) or conf.get(key)
+        # systemd d'abord (le secret n'est alors pas dans l'environnement),
+        # puis la variable, puis le fichier de configuration
+        return (secrets_infra.lire_secret(env.lower(), env)
+                or conf.get(key))
 
     creds = {
         "endpoint": args.endpoint or pick("OVH_ENDPOINT", "endpoint") or "ovh-eu",

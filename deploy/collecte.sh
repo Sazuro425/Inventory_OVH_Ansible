@@ -14,24 +14,34 @@ ENV_FILE="${INVENTAIRE_ENV:-/etc/inventaire-infra.env}"
 VERROU="${INVENTAIRE_LOCK:-/tmp/inventaire-infra.lock}"
 PYTHON="${INVENTAIRE_PYTHON:-python3}"
 
-if [[ -r "$ENV_FILE" ]]; then
+# Deux sources possibles. systemd-creds depose les secrets dans un repertoire
+# qu'il est seul a pouvoir lire, et les scripts Python le consultent avant
+# l'environnement ; sinon on charge le fichier d'environnement.
+SECRETS_PAR_SYSTEMD=0
+if [[ -n "${CREDENTIALS_DIRECTORY:-}" && -r "${CREDENTIALS_DIRECTORY}/pve_token" ]]; then
+  SECRETS_PAR_SYSTEMD=1
+  echo "secrets fournis par systemd-creds"
+elif [[ -r "$ENV_FILE" ]]; then
   set -a
   # shellcheck disable=SC1090
   source "$ENV_FILE"
   set +a
 else
-  echo "fichier d'environnement illisible : $ENV_FILE" >&2
-  echo "copie deploy/inventaire.env.example et renseigne-le (chmod 600)" >&2
+  echo "aucun secret disponible : ni CREDENTIALS_DIRECTORY, ni $ENV_FILE" >&2
+  echo "renseigne deploy/inventaire.env.example (chmod 640)," >&2
+  echo "ou chiffre-les avec deploy/chiffrer-secrets.sh" >&2
   exit 78  # EX_CONFIG
 fi
 
-for var in OVH_APPLICATION_KEY OVH_APPLICATION_SECRET OVH_CONSUMER_KEY \
-           PVE_TOKEN INVENTORY_DB_PASSWORD; do
-  if [[ -z "${!var:-}" ]]; then
-    echo "variable manquante dans $ENV_FILE : $var" >&2
-    exit 78
-  fi
-done
+if [[ $SECRETS_PAR_SYSTEMD -eq 0 ]]; then
+  for var in OVH_APPLICATION_KEY OVH_APPLICATION_SECRET OVH_CONSUMER_KEY \
+             PVE_TOKEN INVENTORY_DB_PASSWORD; do
+    if [[ -z "${!var:-}" ]]; then
+      echo "variable manquante dans $ENV_FILE : $var" >&2
+      exit 78
+    fi
+  done
+fi
 
 cd "$RACINE"
 

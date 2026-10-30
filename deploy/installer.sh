@@ -19,6 +19,7 @@ set -euo pipefail
 PREFIXE="${PREFIXE:-/opt/inventaire-infra}"
 UTILISATEUR="${UTILISATEUR:-inventaire}"
 FICHIER_ENV="/etc/inventaire-infra.env"
+FICHIER_ENV_WEB="/etc/inventaire-infra-web.env"
 RACINE_WEB="${RACINE_WEB:-/var/www/inventaire}"
 SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -80,7 +81,7 @@ done
 vert "   python3 $(python3 --version 2>&1 | cut -d' ' -f2), systemd present"
 
 MANQUANTS=()
-for module in yaml pymysql requests; do
+for module in yaml pymysql requests cryptography; do
   python3 -c "import $module" 2>/dev/null || MANQUANTS+=("$module")
 done
 if [[ ${#MANQUANTS[@]} -gt 0 ]]; then
@@ -91,6 +92,8 @@ if [[ ${#MANQUANTS[@]} -gt 0 ]]; then
       yaml)    PAQUETS+=("python3-yaml") ;;
       pymysql) PAQUETS+=("python3-pymysql") ;;
       requests) PAQUETS+=("python3-requests") ;;
+      # AES-GCM pour secret_store : les secrets chiffres en base
+      cryptography) PAQUETS+=("python3-cryptography") ;;
     esac
   done
   faire apt-get install -y "${PAQUETS[@]}"
@@ -114,7 +117,7 @@ etape "Code applicatif dans $PREFIXE"
 
 faire mkdir -p "$PREFIXE"
 # deploy/ est indispensable : le service systemd lance deploy/collecte.sh
-for element in *.py assets sql exemples client deploy; do
+for element in *.py assets sql exemples client deploy docs; do
   [[ -e "$SOURCE/$element" ]] || continue
   faire cp -r "$SOURCE/$element" "$PREFIXE/"
 done
@@ -145,6 +148,22 @@ else
   faire chown root:"$UTILISATEUR" "$FICHIER_ENV"
   faire chmod 640 "$FICHIER_ENV"
   jaune "   $FICHIER_ENV cree depuis le modele : A RENSEIGNER"
+fi
+
+# Le service web a son propre fichier, et son propre compte de base : il ne
+# doit pas voir les clefs OVH ni les jetons PVE, puisque c'est lui qui est
+# joignable depuis le reseau. L'unite le charge avec "EnvironmentFile=-", qui
+# tolere son absence — le service demarrerait donc sans mot de passe, pour
+# echouer a la premiere requete. D'ou le depot ici.
+if [[ $AVEC_WEB -eq 1 ]]; then
+  if [[ -e "$FICHIER_ENV_WEB" ]]; then
+    vert "   $FICHIER_ENV_WEB conserve"
+  else
+    faire cp "$SOURCE/deploy/inventaire-web.env.example" "$FICHIER_ENV_WEB"
+    faire chown root:"$UTILISATEUR" "$FICHIER_ENV_WEB"
+    faire chmod 640 "$FICHIER_ENV_WEB"
+    jaune "   $FICHIER_ENV_WEB cree depuis le modele : A RENSEIGNER"
+  fi
 fi
 
 # --------------------------------------------------------------------------
@@ -201,8 +220,17 @@ etape "Ce qu'il reste a faire"
 RESTE=()
 grep -q '^OVH_APPLICATION_KEY=.\+' "$FICHIER_ENV" 2>/dev/null \
   || RESTE+=("renseigner $FICHIER_ENV (cles OVH, token PVE, mot de passe base)")
+if [[ $AVEC_WEB -eq 1 ]]; then
+  grep -q '^INVENTORY_DB_PASSWORD=.\+' "$FICHIER_ENV_WEB" 2>/dev/null \
+    || RESTE+=("renseigner $FICHIER_ENV_WEB (mot de passe du compte inventory_web)")
+fi
 RESTE+=("creer la base et le compte : cd $PREFIXE && python3 setup_inventory_db.py --db-password '<mdp>'")
+RESTE+=("creer le compte du service web : mariadb -u root -p < $PREFIXE/sql/setup_db.sql")
+RESTE+=("verifier la separation : les deux requetes en fin de sql/setup_db.sql doivent ne rien renvoyer")
 RESTE+=("eprouver la collecte : python3 infra_inventory.py --refresh --seulement 'ns1234*' --table")
+RESTE+=("chiffrer les secrets : ./deploy/chiffrer-secrets.sh, puis basculer les unites en LoadCredentialEncrypted")
+RESTE+=("si secrets en base : python3 inventory_cli.py --init-key | systemd-creds encrypt --name=master_key - /etc/inventaire-infra/creds/master_key.cred")
+RESTE+=("le detail de tout cela : $PREFIXE/docs/deploiement.md")
 [[ $AVEC_TIMER -eq 1 ]] && RESTE+=("activer la collecte : systemctl enable --now inventaire-collecte.timer")
 [[ $AVEC_WEB -eq 1 ]] && RESTE+=("activer le service web : systemctl enable --now inventaire-web.service")
 [[ $AVEC_APACHE -eq 1 ]] && RESTE+=("ajuster ServerName puis a2ensite inventaire")

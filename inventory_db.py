@@ -17,6 +17,8 @@ import decimal
 import os
 from pathlib import Path
 
+import secrets_infra
+
 try:
     import pymysql
     from pymysql.cursors import DictCursor
@@ -33,10 +35,11 @@ def db_settings(conf=None):
     d = dict((conf or {}).get("db") or {})
 
     def pick(key, env, defaut=None):
+        depuis_systemd = secrets_infra.lire_secret(env.lower())
+        if depuis_systemd:
+            return depuis_systemd
         val = os.environ.get(env, d.get(key, defaut))
-        if isinstance(val, str) and val.startswith("env:"):
-            val = os.environ.get(val[4:])
-        return val
+        return secrets_infra.resoudre(val)
 
     return {
         "host": pick("host", "INVENTORY_DB_HOST", "127.0.0.1"),

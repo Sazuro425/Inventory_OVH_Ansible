@@ -1,5 +1,16 @@
 # Inventaire d'infrastructure OVH -> Proxmox
-# Aucun secret ici : les valeurs "env:NOM" sont lues dans l'environnement.
+#
+# Aucun secret ici, seulement des references. Trois formes :
+#
+#   env:NOM      la variable d'environnement, ou le secret systemd du meme
+#                nom s'il existe — c'est ce qui permet de basculer sous
+#                systemd-creds sans rien reecrire ici
+#   cred:nom     un secret systemd, et lui seul
+#   db:nom       un secret chiffre dans secret_store, dechiffre avec la clef
+#                maitresse. Demande la base et la clef : a reserver aux
+#                secrets nombreux, typiquement les jetons PVE
+#
+# Une configuration sans aucun "db:" tourne sans base et sans TPM.
 
 ovh:
   endpoint: ovh-eu
@@ -19,6 +30,8 @@ pve:
   # token different pour un hote precis :
   tokens: {}
   #  ns1234.ip-1-2-3.eu: "env:PVE_TOKEN_CLUSTER2"
+  # en base, pose par `inventory --pve ns1234.ip-1-2-3.eu` :
+  #  ns1234.ip-1-2-3.eu: "db:pve_token_ns1234_ip_1_2_3_eu"
   # dedies OVH qui ne sont pas des hyperviseurs (evite un sondage inutile
   # et une ligne dans pve_unreachable)
   skip: []

@@ -1,0 +1,1164 @@
+<title>Inventaire OVH Proxmox</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Lecture en colonne unique, rail de navigation collant a gauche au-dela de 1000px. */
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --surface-2: #eceff3;
+  --border: #d3dae1;
+  --border-fort: #aab6c0;
+  --fg: #141a1f;
+  --fg-dim: #5a6872;
+  --accent: #0d6e80;
+  --accent-faible: #e2f1f4;
+  --ok: #1d6b3f;
+  --warn: #8a5600;
+  --warn-faible: #fbf0dc;
+  --danger: #a32020;
+  --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11151a;
+    --surface: #181d24;
+    --surface-2: #1f262e;
+    --border: #2c343d;
+    --border-fort: #46525e;
+    --fg: #e2e8ee;
+    --fg-dim: #96a3af;
+    --accent: #3ec6dc;
+    --accent-faible: #12323a;
+    --ok: #5cc98a;
+    --warn: #e0a449;
+    --warn-faible: #30260f;
+    --danger: #ef7676;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11151a;
+  --surface: #181d24;
+  --surface-2: #1f262e;
+  --border: #2c343d;
+  --border-fort: #46525e;
+  --fg: #e2e8ee;
+  --fg-dim: #96a3af;
+  --accent: #3ec6dc;
+  --accent-faible: #12323a;
+  --ok: #5cc98a;
+  --warn: #e0a449;
+  --warn-faible: #30260f;
+  --danger: #ef7676;
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+.page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 72px;
+}
+@media (min-width: 1000px) {
+  .page { display: grid; grid-template-columns: 196px minmax(0, 1fr); gap: 48px; align-items: start; }
+  .entete { grid-column: 1 / -1; }
+}
+
+/* --- entete --- */
+.entete { border-bottom: 1px solid var(--border); padding-bottom: 28px; margin-bottom: 36px; }
+.eyebrow {
+  font-family: var(--mono); font-size: 11px; font-weight: 500;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--accent);
+}
+h1 {
+  font-size: clamp(26px, 5vw, 38px); font-weight: 600; line-height: 1.15;
+  margin: 10px 0 12px; text-wrap: balance; letter-spacing: -.015em;
+}
+.chapeau { color: var(--fg-dim); max-width: 62ch; margin: 0; }
+.meta {
+  display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 20px;
+  font-family: var(--mono); font-size: 12px; color: var(--fg-dim);
+}
+.meta b { color: var(--fg); font-weight: 500; }
+
+/* --- rail --- */
+nav { font-size: 13px; }
+@media (min-width: 1000px) { nav { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); } }
+nav ol { list-style: none; margin: 0 0 32px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+nav a {
+  display: block; padding: 5px 9px; border-radius: 5px; color: var(--fg-dim);
+  text-decoration: none; border-left: 2px solid transparent;
+}
+nav a:hover { color: var(--fg); background: var(--surface-2); }
+nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (max-width: 999px) {
+  nav { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 36px; }
+  nav ol { margin-bottom: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+}
+
+/* --- sections --- */
+main > section { margin-bottom: 56px; scroll-margin-top: 24px; }
+h2 {
+  font-size: 21px; font-weight: 600; letter-spacing: -.01em;
+  margin: 0 0 4px; padding-top: 4px;
+}
+h2 .num {
+  font-family: var(--mono); font-size: 12px; font-weight: 500;
+  color: var(--accent); margin-right: 10px; vertical-align: 2px;
+}
+h3 { font-size: 15px; font-weight: 600; margin: 28px 0 8px; }
+.sous { color: var(--fg-dim); font-size: 13.5px; margin: 0 0 20px; max-width: 70ch; }
+p { max-width: 72ch; }
+p + p { margin-top: 12px; }
+ul, ol.liste { max-width: 72ch; padding-left: 20px; }
+li + li { margin-top: 5px; }
+code {
+  font-family: var(--mono); font-size: .88em;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 5px; white-space: nowrap;
+}
+strong { font-weight: 600; }
+
+/* --- figures --- */
+figure {
+  margin: 24px 0; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 20px 16px 14px; overflow-x: auto;
+}
+figure svg { display: block; max-width: 100%; height: auto; margin: 0 auto; color: var(--fg); }
+figcaption {
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border);
+  font-size: 12.5px; color: var(--fg-dim); text-align: left;
+}
+.svg-box { fill: var(--surface-2); stroke: var(--border-fort); }
+.svg-box-accent { fill: var(--accent-faible); stroke: var(--accent); }
+.svg-t { font-family: var(--mono); font-size: 12px; fill: var(--fg); }
+.svg-t-sm { font-family: var(--mono); font-size: 10.5px; fill: var(--fg-dim); }
+.svg-t-b { font-family: var(--mono); font-size: 12px; font-weight: 600; fill: var(--fg); }
+.svg-arrow { stroke: var(--border-fort); stroke-width: 1.4; fill: none; }
+.svg-arrow-accent { stroke: var(--accent); stroke-width: 1.6; fill: none; }
+.svg-dash { stroke-dasharray: 4 3; }
+
+/* --- tableaux --- */
+.tbl-wrap { overflow-x: auto; margin: 20px 0; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 520px; }
+th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+thead th {
+  font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--fg-dim); background: var(--surface-2);
+  white-space: nowrap;
+}
+tbody tr:last-child td { border-bottom: none; }
+td code { white-space: nowrap; }
+.col-mono { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; }
+
+/* --- blocs de code --- */
+pre {
+  margin: 16px 0; padding: 14px 16px; overflow-x: auto;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+}
+pre code { background: none; border: none; padding: 0; white-space: pre; }
+pre .c { color: var(--fg-dim); }
+pre .k { color: var(--accent); }
+
+/* --- encarts --- */
+.note {
+  margin: 20px 0; padding: 14px 16px; border-radius: 8px;
+  border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  background: var(--surface); font-size: 13.5px;
+}
+.note.attention { border-left-color: var(--warn); background: var(--warn-faible); }
+.note .titre {
+  font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--fg-dim); display: block; margin-bottom: 5px;
+}
+.note p { max-width: 68ch; margin: 0; }
+.note p + p { margin-top: 8px; }
+
+/* --- pastilles d'etat --- */
+.pill {
+  display: inline-block; font-family: var(--mono); font-size: 11px; font-weight: 500;
+  padding: 2px 8px; border-radius: 99px; border: 1px solid var(--border-fort);
+  color: var(--fg-dim); white-space: nowrap;
+}
+.pill.ok { color: var(--ok); border-color: currentColor; }
+.pill.warn { color: var(--warn); border-color: currentColor; }
+.pill.danger { color: var(--danger); border-color: currentColor; }
+
+/* --- grille de cartes --- */
+.cartes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 20px 0; }
+.carte {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 16px; min-width: 0;
+}
+.carte h4 { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+.carte .r { font-family: var(--mono); font-size: 11px; color: var(--accent); letter-spacing: .06em; text-transform: uppercase; display: block; margin-bottom: 8px; }
+.carte p { margin: 0; font-size: 13px; color: var(--fg-dim); max-width: none; }
+</style>
+
+<div class="page">
+
+<header class="entete">
+  <span class="eyebrow">Reference d'architecture</span>
+  <h1>Inventaire OVH &rarr; Proxmox &rarr; Ansible</h1>
+  <p class="chapeau">La chaine complete, du serveur dedie facture chez OVH jusqu'au playbook execute sur une VM : ce que chaque module fait, ce qui circule entre eux, et ou se trouve l'etat.</p>
+  <div class="meta">
+    <span><b>38</b> fichiers suivis</span>
+    <span><b>5 347</b> lignes Python</span>
+    <span><b>6</b> tables &middot; <b>5</b> vues</span>
+    <span>branche <b>main</b></span>
+  </div>
+</header>
+
+<nav aria-label="Sommaire">
+  <ol>
+    <li><a href="#modele">Le modele mental</a></li>
+    <li><a href="#flux">Flux principal</a></li>
+    <li><a href="#modules">Les modules</a></li>
+    <li><a href="#dedup">Deduplication PVE</a></li>
+    <li><a href="#base">Base de donnees</a></li>
+    <li><a href="#ansible">Groupes Ansible</a></li>
+    <li><a href="#jeton">Flux du jeton</a></li>
+    <li><a href="#bastion">Bastion et acces</a></li>
+    <li><a href="#secrets">Secrets</a></li>
+    <li><a href="#deploiement">Deploiement</a></li>
+    <li><a href="#config">Configuration</a></li>
+    <li><a href="#reste">Ce qui reste</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<section id="modele">
+  <h2><span class="num">01</span>Le modele mental</h2>
+  <p class="sous">Quatre plans, quatre questions distinctes. C'est la decoupe qui tient tout le reste : chaque module appartient a un seul plan, et aucun plan ne depend de l'etat d'un autre pour fonctionner.</p>
+
+  <div class="cartes">
+    <div class="carte">
+      <span class="r">Plan 1 &middot; Realite</span>
+      <h4>Ce qui existe</h4>
+      <p>L'API OVH dit quelles machines sont facturees. L'API Proxmox dit ce qui tourne dessus. Source de verite materielle, jamais saisie a la main.</p>
+    </div>
+    <div class="carte">
+      <span class="r">Plan 2 &middot; Accessibilite</span>
+      <h4>Ce qui est joignable</h4>
+      <p>The Bastion dit qui a le droit d'atteindre quoi. Comparer les deux plans revele les trous : machine connue mais inaccessible, acces declare vers une machine disparue.</p>
+    </div>
+    <div class="carte">
+      <span class="r">Plan 3 &middot; Signification</span>
+      <h4>Ce que ca veut dire</h4>
+      <p>Les tags portent l'intention humaine : production, a decommissionner, hors perimetre. L'API ne les devine pas, la base les conserve.</p>
+    </div>
+    <div class="carte">
+      <span class="r">Plan 4 &middot; Action</span>
+      <h4>Ce qu'on en fait</h4>
+      <p>Le client transforme l'inventaire en cibles Ansible. Un jeton a usage unique relie l'intention de l'operateur a l'execution.</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <span class="titre">Pourquoi cette separation compte</span>
+    <p>La collecte tourne sans le web, le web sert sans le client, le client fonctionne sur un cache. Une panne de MariaDB n'empeche pas une collecte de reussir en memoire ; une panne d'Authentik n'empeche pas un playbook deja prepare de tourner. Chaque lien est volontairement faible.</p>
+  </div>
+</section>
+
+<section id="flux">
+  <h2><span class="num">02</span>Flux principal</h2>
+  <p class="sous">Le chemin d'une donnee, de l'appel HTTP jusqu'au playbook. Les fleches teal portent les donnees d'inventaire ; les grises, les secrets et les appels de controle.</p>
+
+  <figure>
+    <svg viewBox="0 0 880 470" role="img" aria-label="Flux de donnees : les API OVH et Proxmox alimentent l'orchestrateur, qui ecrit un snapshot dans MariaDB ; la topologie, le service web et le client lisent ce snapshot.">
+      <defs>
+        <marker id="fl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <polygon points="0,1 10,5 0,9" fill="context-stroke" stroke="none"/>
+        </marker>
+      </defs>
+
+      <!-- colonne 1 : sources -->
+      <text class="svg-t-sm" x="16" y="22">SOURCES EXTERNES</text>
+      <rect class="svg-box" x="16" y="34" width="168" height="58" rx="7"/>
+      <text class="svg-t-b" x="30" y="56">API OVH</text>
+      <text class="svg-t-sm" x="30" y="74">api.ovh.com/1.0</text>
+
+      <rect class="svg-box" x="16" y="108" width="168" height="58" rx="7"/>
+      <text class="svg-t-b" x="30" y="130">API Proxmox VE</text>
+      <text class="svg-t-sm" x="30" y="148">:8006 &middot; cert epingle</text>
+
+      <rect class="svg-box" x="16" y="182" width="168" height="58" rx="7"/>
+      <text class="svg-t-b" x="30" y="204">The Bastion</text>
+      <text class="svg-t-sm" x="30" y="222">selfListAccesses</text>
+
+      <!-- colonne 2 : orchestrateur -->
+      <text class="svg-t-sm" x="248" y="22">COLLECTE</text>
+      <rect class="svg-box-accent" x="248" y="34" width="176" height="132" rx="7"/>
+      <text class="svg-t-b" x="262" y="58">infra_inventory</text>
+      <text class="svg-t-sm" x="262" y="78">gather()</text>
+      <text class="svg-t-sm" x="262" y="95">probe_cluster()</text>
+      <text class="svg-t-sm" x="262" y="112">collect_cluster()</text>
+      <text class="svg-t-sm" x="262" y="129">build_ansible()</text>
+      <text class="svg-t-sm" x="262" y="152">10 threads</text>
+
+      <rect class="svg-box" x="248" y="190" width="176" height="50" rx="7"/>
+      <text class="svg-t" x="262" y="211">cache JSON</text>
+      <text class="svg-t-sm" x="262" y="229">.infra_cache.json &middot; 900 s</text>
+
+      <!-- colonne 3 : base -->
+      <text class="svg-t-sm" x="488" y="22">ETAT</text>
+      <rect class="svg-box-accent" x="488" y="34" width="150" height="132" rx="7"/>
+      <text class="svg-t-b" x="502" y="58">MariaDB</text>
+      <text class="svg-t-sm" x="502" y="78">collect_run</text>
+      <text class="svg-t-sm" x="502" y="95">server_snapshot</text>
+      <text class="svg-t-sm" x="502" y="112">node_snapshot</text>
+      <text class="svg-t-sm" x="502" y="129">guest_snapshot</text>
+      <text class="svg-t-sm" x="502" y="152">client_token</text>
+
+      <!-- colonne 4 : restitution -->
+      <text class="svg-t-sm" x="702" y="22">RESTITUTION</text>
+      <rect class="svg-box" x="702" y="34" width="162" height="58" rx="7"/>
+      <text class="svg-t-b" x="716" y="56">topologie.py</text>
+      <text class="svg-t-sm" x="716" y="74">&rarr; topologie.html</text>
+
+      <rect class="svg-box" x="702" y="108" width="162" height="58" rx="7"/>
+      <text class="svg-t-b" x="716" y="130">serveur_web.py</text>
+      <text class="svg-t-sm" x="716" y="148">127.0.0.1:8080</text>
+
+      <rect class="svg-box" x="702" y="182" width="162" height="58" rx="7"/>
+      <text class="svg-t-b" x="716" y="204">bastion_diff.py</text>
+      <text class="svg-t-sm" x="716" y="222">rapport d'ecart</text>
+
+      <!-- fleches sources -> orchestrateur -->
+      <path class="svg-arrow-accent" marker-end="url(#fl)" d="M184 63 H248"/>
+      <text class="svg-t-sm" x="192" y="56">dedies</text>
+      <path class="svg-arrow-accent" marker-end="url(#fl)" d="M184 137 H248"/>
+      <text class="svg-t-sm" x="192" y="130">VM / CT</text>
+
+      <!-- cache -->
+      <path class="svg-arrow" marker-end="url(#fl)" d="M336 166 V190"/>
+      <path class="svg-arrow" marker-end="url(#fl)" d="M356 190 V170"/>
+
+      <!-- orchestrateur -> base -->
+      <path class="svg-arrow-accent" marker-end="url(#fl)" d="M424 86 H488"/>
+      <text class="svg-t-sm" x="426" y="79">store_run</text>
+      <path class="svg-arrow-accent" marker-end="url(#fl)" d="M488 126 H424"/>
+      <text class="svg-t-sm" x="424" y="145">load_latest</text>
+
+      <!-- base -> restitution -->
+      <path class="svg-arrow-accent" marker-end="url(#fl)" d="M638 86 H670 V63 H702"/>
+      <path class="svg-arrow-accent" marker-end="url(#fl)" d="M638 126 H702"/>
+      <path class="svg-arrow-accent" marker-end="url(#fl)" d="M638 140 H670 V211 H702"/>
+
+      <!-- bastion -> diff (direct) -->
+      <path class="svg-arrow svg-dash" marker-end="url(#fl)" d="M100 240 V282 H782 V240"/>
+      <text class="svg-t-sm" x="360" y="276">acces declares &rarr; comparaison</text>
+
+      <!-- bande basse : exploitation -->
+      <line x1="16" y1="320" x2="864" y2="320" stroke="var(--border)" stroke-width="1"/>
+      <text class="svg-t-sm" x="16" y="344">EXPLOITATION</text>
+
+      <rect class="svg-box" x="16" y="356" width="190" height="62" rx="7"/>
+      <text class="svg-t-b" x="30" y="378">Navigateur</text>
+      <text class="svg-t-sm" x="30" y="396">OIDC Authentik</text>
+
+      <rect class="svg-box" x="258" y="356" width="166" height="62" rx="7"/>
+      <text class="svg-t-b" x="272" y="378">Apache + OIDC</text>
+      <text class="svg-t-sm" x="272" y="396">X-Remote-User</text>
+
+      <rect class="svg-box" x="476" y="356" width="162" height="62" rx="7"/>
+      <text class="svg-t-b" x="490" y="378">client/infra.py</text>
+      <text class="svg-t-sm" x="490" y="396">update &middot; run</text>
+
+      <rect class="svg-box" x="690" y="356" width="174" height="62" rx="7"/>
+      <text class="svg-t-b" x="704" y="378">ansible-playbook</text>
+      <text class="svg-t-sm" x="704" y="396">via le bastion</text>
+
+      <path class="svg-arrow" marker-end="url(#fl)" d="M206 387 H258"/>
+      <path class="svg-arrow-accent" marker-end="url(#fl)" d="M424 387 H476"/>
+      <text class="svg-t-sm" x="420" y="438">jeton + inventaire</text>
+      <path class="svg-arrow-accent" marker-end="url(#fl)" d="M638 387 H690"/>
+      <path class="svg-arrow" marker-end="url(#fl)" d="M341 356 V332"/>
+      <text class="svg-t-sm" x="350" y="348">POST /api/token</text>
+    </svg>
+    <figcaption><strong>Un seul point d'ecriture, trois lecteurs.</strong> L'orchestrateur est le seul a ecrire en base ; la topologie, le service web et le comparatif bastion lisent tous le meme dernier snapshot. Le cache JSON n'est qu'un raccourci local pour eviter de rappeler les API pendant 15 minutes.</figcaption>
+  </figure>
+</section>
+
+<section id="modules">
+  <h2><span class="num">03</span>Les modules</h2>
+  <p class="sous">Chaque fichier a une seule responsabilite et s'execute seul en ligne de commande. C'est ce qui permet de deboguer un etage sans lancer toute la chaine.</p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead>
+        <tr><th>Fichier</th><th>Lignes</th><th>Role</th><th>Points d'entree</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="col-mono">ovh_inventory.py</td><td class="col-mono">467</td>
+          <td>Client API OVH : signature SHA1 maison, pas de SDK. Decalage horaire gere, 4 tentatives par appel.</td>
+          <td class="col-mono">OvhClient &middot; fetch_dedicated() &middot; fetch_vps()</td>
+        </tr>
+        <tr>
+          <td class="col-mono">proxmox_inventory.py</td><td class="col-mono">413</td>
+          <td>Client API PVE. Epingle le certificat du noeud comme ancre de confiance plutot que de desactiver TLS.</td>
+          <td class="col-mono">PveClient &middot; collect() &middot; node_summary() &middot; pin_certificate()</td>
+        </tr>
+        <tr>
+          <td class="col-mono">infra_inventory.py</td><td class="col-mono">774</td>
+          <td>Orchestrateur. Croise OVH et PVE, deduplique les clusters, construit l'inventaire Ansible.</td>
+          <td class="col-mono">gather() &middot; build_ansible() &middot; commandes_bastion()</td>
+        </tr>
+        <tr>
+          <td class="col-mono">inventory_db.py</td><td class="col-mono">346</td>
+          <td>Couche MariaDB. Schema idempotent, snapshots complets, purge au-dela de N executions.</td>
+          <td class="col-mono">connect() &middot; store_run() &middot; load_latest() &middot; purge()</td>
+        </tr>
+        <tr>
+          <td class="col-mono">topologie.py</td><td class="col-mono">491</td>
+          <td>Rend le schema interactif. Ecriture atomique : le serveur ne sert jamais une page tronquee.</td>
+          <td class="col-mono">construire() &middot; rendre() &middot; ecrire_atomique()</td>
+        </tr>
+        <tr>
+          <td class="col-mono">bastion_diff.py</td><td class="col-mono">356</td>
+          <td>Compare l'inventaire aux acces declares. Gere les CIDR et les jokers dans les motifs.</td>
+          <td class="col-mono">lire_acces() &middot; comparer() &middot; rapport()</td>
+        </tr>
+        <tr>
+          <td class="col-mono">serveur_web.py</td><td class="col-mono">254</td>
+          <td>Service HTTP minimal. N'ecoute que sur la boucle locale, l'identite vient de l'en-tete d'Apache.</td>
+          <td class="col-mono">emettre_jeton() &middot; consommer_jeton()</td>
+        </tr>
+        <tr>
+          <td class="col-mono">client/infra.py</td><td class="col-mono">338</td>
+          <td>Client admin. Recupere l'inventaire avec un jeton, le convertit au format natif, lance Ansible.</td>
+          <td class="col-mono">update &middot; list &middot; simulate &middot; run</td>
+        </tr>
+        <tr>
+          <td class="col-mono">secrets_infra.py</td><td class="col-mono">79</td>
+          <td>Lecture des secrets : systemd-creds d'abord, environnement en repli. Aucune dependance, pour rester lisible meme base en panne.</td>
+          <td class="col-mono">lire_secret() &middot; resoudre() &middot; source()</td>
+        </tr>
+        <tr>
+          <td class="col-mono">secret_store.py</td><td class="col-mono">178</td>
+          <td>Secrets chiffres en base. AES-GCM, le nom du secret en <code>aad</code>, versions conservees.</td>
+          <td class="col-mono">chiffrer() &middot; dechiffrer() &middot; lire() &middot; ecrire() &middot; lister()</td>
+        </tr>
+        <tr>
+          <td class="col-mono">tests_secret_store.py</td><td class="col-mono">290</td>
+          <td>16 tests du contrat de chiffrement, sans base ni systemd. <span class="pill ok">16/16</span></td>
+          <td class="col-mono">python3 tests_secret_store.py</td>
+        </tr>
+        <tr>
+          <td class="col-mono">inventory_cli.py</td><td class="col-mono">645</td>
+          <td>Administration des secrets. Saisie masquee, test avant ecriture, versions conservees.</td>
+          <td class="col-mono">--list &middot; --init-key &middot; --ovh &middot; --pve &middot; --db &middot; --rotate-key</td>
+        </tr>
+        <tr>
+          <td class="col-mono">setup_inventory_db.py</td><td class="col-mono">385</td>
+          <td>Creation de la base, du compte et du schema. Contourne le plugin gssapi de MariaDB.</td>
+          <td class="col-mono">&mdash;</td>
+        </tr>
+        <tr>
+          <td class="col-mono">generer_demo.py</td><td class="col-mono">264</td>
+          <td>Parc fictif pour tester a l'echelle : 30 dedies, 16 clusters, 308 invites, adresses RFC 5737.</td>
+          <td class="col-mono">&mdash;</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <span class="titre">Les deux couches de secrets</span>
+    <p><code>secrets_infra.py</code> n'a aucune dependance et lit les deux secrets d'amorcage &mdash; le mot de passe de la base et la clef maitresse. <code>secret_store.py</code> s'appuie dessus pour dechiffrer tout le reste. L'ordre compte : le premier doit fonctionner quand la base est en panne, ce qui est precisement le moment ou on en a besoin.</p>
+  </div>
+</section>
+
+<section id="dedup">
+  <h2><span class="num">04</span>Deduplication des clusters PVE</h2>
+  <p class="sous">Le mecanisme le plus subtil de la collecte, et celui qui n'a jamais tourne sur le vrai parc. Interroger les 30 dedies naivement reviendrait a collecter chaque cluster autant de fois qu'il a de noeuds.</p>
+
+  <figure>
+    <svg viewBox="0 0 760 300" role="img" aria-label="Sans deduplication, trois noeuds d'un meme cluster renvoient chacun l'inventaire complet du cluster. Avec deduplication, une sonde legere identifie le cluster puis un seul representant est interroge en detail.">
+      <defs>
+        <marker id="fl2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <polygon points="0,1 10,5 0,9" fill="context-stroke" stroke="none"/>
+        </marker>
+      </defs>
+
+      <text class="svg-t-sm" x="14" y="20">ETAPE 1 &middot; SONDE LEGERE &mdash; probe_cluster() sur chaque dedie</text>
+
+      <rect class="svg-box" x="14" y="34" width="118" height="46" rx="6"/>
+      <text class="svg-t" x="28" y="54">pve-a1</text>
+      <text class="svg-t-sm" x="28" y="70">cluster: prod-1</text>
+
+      <rect class="svg-box" x="14" y="92" width="118" height="46" rx="6"/>
+      <text class="svg-t" x="28" y="112">pve-a2</text>
+      <text class="svg-t-sm" x="28" y="128">cluster: prod-1</text>
+
+      <rect class="svg-box" x="14" y="150" width="118" height="46" rx="6"/>
+      <text class="svg-t" x="28" y="170">pve-a3</text>
+      <text class="svg-t-sm" x="28" y="186">cluster: prod-1</text>
+
+      <rect class="svg-box" x="14" y="208" width="118" height="46" rx="6"/>
+      <text class="svg-t" x="28" y="228">pve-z9</text>
+      <text class="svg-t-sm" x="28" y="244">isole</text>
+
+      <!-- regroupement -->
+      <path class="svg-arrow" marker-end="url(#fl2)" d="M132 57 H176 V115 H200"/>
+      <path class="svg-arrow" marker-end="url(#fl2)" d="M132 115 H200"/>
+      <path class="svg-arrow" marker-end="url(#fl2)" d="M132 173 H176 V121 H200"/>
+      <path class="svg-arrow" marker-end="url(#fl2)" d="M132 231 H200"/>
+
+      <text class="svg-t-sm" x="214" y="20">ETAPE 2 &middot; UN REPRESENTANT PAR cluster_name</text>
+
+      <rect class="svg-box-accent" x="200" y="92" width="150" height="54" rx="6"/>
+      <text class="svg-t-b" x="214" y="114">prod-1</text>
+      <text class="svg-t-sm" x="214" y="132">representant: pve-a1</text>
+
+      <rect class="svg-box-accent" x="200" y="208" width="150" height="54" rx="6"/>
+      <text class="svg-t-b" x="214" y="230">pve-z9</text>
+      <text class="svg-t-sm" x="214" y="248">noeud seul</text>
+
+      <!-- collecte detail -->
+      <path class="svg-arrow-accent" marker-end="url(#fl2)" d="M350 119 H404"/>
+      <text class="svg-t-sm" x="352" y="112">1 appel</text>
+      <path class="svg-arrow-accent" marker-end="url(#fl2)" d="M350 235 H404"/>
+
+      <text class="svg-t-sm" x="418" y="20">ETAPE 3 &middot; COLLECTE DETAILLEE &mdash; collect_cluster()</text>
+
+      <rect class="svg-box" x="404" y="92" width="166" height="54" rx="6"/>
+      <text class="svg-t" x="418" y="114">/cluster/resources</text>
+      <text class="svg-t-sm" x="418" y="132">toutes les VM du cluster</text>
+
+      <rect class="svg-box" x="404" y="208" width="166" height="54" rx="6"/>
+      <text class="svg-t" x="418" y="230">/cluster/resources</text>
+      <text class="svg-t-sm" x="418" y="248">VM du noeud</text>
+
+      <!-- resultat -->
+      <path class="svg-arrow-accent" marker-end="url(#fl2)" d="M570 119 H606 V165 H628"/>
+      <path class="svg-arrow-accent" marker-end="url(#fl2)" d="M570 235 H606 V175 H628"/>
+
+      <rect class="svg-box-accent" x="628" y="140" width="118" height="60" rx="6"/>
+      <text class="svg-t-b" x="642" y="162">snapshot</text>
+      <text class="svg-t-sm" x="642" y="180">chaque VM</text>
+      <text class="svg-t-sm" x="642" y="194">une seule fois</text>
+
+      <!-- note du chemin naif -->
+      <line x1="14" y1="276" x2="746" y2="276" stroke="var(--border)" stroke-width="1" stroke-dasharray="4 3"/>
+      <text class="svg-t-sm" x="14" y="294">Sans l'etape 2 : 3 appels detailles pour prod-1, chaque VM comptee 3 fois, et un noeud injoignable masque par ses pairs.</text>
+    </svg>
+    <figcaption><strong>La sonde est separee de la collecte.</strong> <code>probe_cluster()</code> ne demande que <code>/cluster/status</code> : il identifie le cluster et detecte l'injoignable. Le groupement par <code>cluster_name</code> se fait ensuite, en memoire, et seul le representant subit la collecte complete. Les noeuds non representants gardent leur ligne dans <code>node_snapshot</code> &mdash; leur materiel est releve individuellement &mdash; mais ne contribuent pas aux invites.</figcaption>
+  </figure>
+
+  <div class="note attention">
+    <span class="titre">Non eprouve</span>
+    <p>Le parc genere par <code>generer_demo.py</code> produit des donnees <em>deja dedupliquees</em> : il fabrique directement un representant par cluster. Le chemin de regroupement n'a donc jamais tourne sur des sondes reelles multiples. C'est le premier test a faire en preprod, avec au moins un cluster a trois noeuds et un noeud volontairement eteint.</p>
+  </div>
+</section>
+
+<section id="base">
+  <h2><span class="num">05</span>Base de donnees</h2>
+  <p class="sous">Snapshots complets, pas de deltas : chaque collecte reecrit l'etat entier et conserve l'historique. La lecture courante passe par des vues, jamais par une requete qui devrait deviner la derniere execution.</p>
+
+  <h3>Tables</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Table</th><th>Clef</th><th>Contenu</th><th>Colonnes notables</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="col-mono">collect_run</td><td class="col-mono">id</td>
+          <td>Une ligne par collecte. Pivot de tout l'historique.</td>
+          <td class="col-mono">status (running / ok / partial / error) &middot; nb_unreachable</td>
+        </tr>
+        <tr>
+          <td class="col-mono">server_snapshot</td><td class="col-mono">run_id + ovh_name</td>
+          <td>Les dedies vus cote OVH.</td>
+          <td class="col-mono">offer &middot; datacenter &middot; expiration &middot; cpu_* &middot; ram_mb</td>
+        </tr>
+        <tr>
+          <td class="col-mono">node_snapshot</td><td class="col-mono">run_id + host</td>
+          <td>Les hyperviseurs PVE, un par machine physique.</td>
+          <td class="col-mono">cluster_name &middot; reachable &middot; error &middot; pve_version &middot; kernel</td>
+        </tr>
+        <tr>
+          <td class="col-mono">guest_snapshot</td><td class="col-mono">run_id + vmid</td>
+          <td>VM et conteneurs.</td>
+          <td class="col-mono">via_host &middot; guest_type &middot; status &middot; tags &middot; disk_gb</td>
+        </tr>
+        <tr>
+          <td class="col-mono">client_token</td><td class="col-mono">empreinte</td>
+          <td>Jetons a usage unique. Le jeton en clair n'est jamais stocke.</td>
+          <td class="col-mono">empreinte CHAR(64) &middot; expire_le &middot; consomme_le &middot; consomme_de</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Vues</h3>
+  <p><code>v_last_run</code> isole la derniere execution reussie ; <code>v_current_servers</code>, <code>v_current_nodes</code> et <code>v_current_guests</code> s'y adossent pour ne rendre que l'etat courant ; <code>v_current_inventory</code> aplatit l'ensemble en une ligne par hote. Toute requete d'exploitation passe par la : si un jour la strategie de snapshot change, le code appelant ne bouge pas.</p>
+
+  <div class="note">
+    <span class="titre">Deux pieges deja rencontres</span>
+    <p><code>via_host</code> dans <code>guest_snapshot</code> enregistre <em>par quel noeud</em> l'invite a ete vu, ce qui n'est pas forcement le noeud qui l'heberge (<code>pve_node</code>). Sans cette distinction, un invite migre semble changer de machine a chaque collecte.</p>
+    <p>Les colonnes <code>DECIMAL</code> remontent en <code>Decimal</code> Python, que <code>json.dumps</code> refuse. C'est le role de <code>_json_ok()</code> dans <code>inventory_db.py</code>.</p>
+  </div>
+</section>
+
+<section id="ansible">
+  <h2><span class="num">06</span>Groupes Ansible derives</h2>
+  <p class="sous">Aucun groupe n'est ecrit a la main : tous se deduisent du snapshot. Ajouter un cluster cree ses groupes sans toucher a une ligne de configuration.</p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Groupe</th><th>Source</th><th>Contient</th></tr></thead>
+      <tbody>
+        <tr><td class="col-mono">pve_nodes</td><td>noeud joignable</td><td>Les hyperviseurs</td></tr>
+        <tr><td class="col-mono">pve_unreachable</td><td>sonde en echec</td><td>Les noeuds muets &mdash; a surveiller, pas a cibler</td></tr>
+        <tr><td class="col-mono">pve_guests</td><td>tout invite</td><td>VM et conteneurs</td></tr>
+        <tr><td class="col-mono">cluster_&lt;nom&gt;</td><td>cluster_name</td><td>Noeuds <strong>et</strong> invites du cluster</td></tr>
+        <tr><td class="col-mono">dc_&lt;code&gt;</td><td>datacenter OVH</td><td>Propage du dedie vers ses invites</td></tr>
+        <tr><td class="col-mono">node_&lt;nom&gt;</td><td>pve_node</td><td>Invites portes par ce noeud</td></tr>
+        <tr><td class="col-mono">type_&lt;qemu|lxc&gt;</td><td>guest_type</td><td>Separation VM / conteneurs</td></tr>
+        <tr><td class="col-mono">status_&lt;etat&gt;</td><td>status PVE</td><td>running, stopped&hellip;</td></tr>
+        <tr><td class="col-mono">tag_&lt;tag&gt;</td><td>tags PVE</td><td>L'intention humaine, un groupe par tag</td></tr>
+        <tr><td class="col-mono">guests_sans_ip</td><td>agent muet</td><td>Invites sans adresse : injoignables en pratique</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Nommage des hotes invites</h3>
+  <pre><code>&lt;nom&gt;-&lt;cluster&gt;-&lt;vmid&gt;      <span class="c"># ex. web01-prod1-142</span></code></pre>
+  <p>Le <code>vmid</code> en suffixe garantit l'unicite : deux clusters peuvent heberger une <code>web01</code>, et un nom seul creerait une collision silencieuse dans l'inventaire.</p>
+
+  <div class="note attention">
+    <span class="titre">Le piege du format</span>
+    <p>Le JSON produit par <code>--list</code> est le format d'un inventaire <em>dynamique</em> : <code>ansible-playbook -i fichier.json</code> le refuse. Le client le reecrit donc en format natif avant de le passer a Ansible :</p>
+    <pre><code>{"all": {"hosts": {&hellip;}, "children": {&hellip;}}}</code></pre>
+  </div>
+</section>
+
+<section id="jeton">
+  <h2><span class="num">07</span>Flux du jeton a usage unique</h2>
+  <p class="sous">Le jeton relie une identite authentifiee par Authentik a une execution Ansible sur le poste de l'operateur, sans que le poste ait a detenir de secret durable.</p>
+
+  <figure>
+    <svg viewBox="0 0 800 330" role="img" aria-label="Le navigateur authentifie demande un jeton, le service en stocke l'empreinte et renvoie le jeton en clair une seule fois ; le client l'echange contre l'inventaire, et l'empreinte est marquee consommee, ce qui fait echouer tout rejeu.">
+      <defs>
+        <marker id="fl3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <polygon points="0,1 10,5 0,9" fill="context-stroke" stroke="none"/>
+        </marker>
+      </defs>
+
+      <!-- lignes de vie -->
+      <text class="svg-t-b" x="14" y="24">Navigateur</text>
+      <line x1="60" y1="36" x2="60" y2="300" stroke="var(--border)" stroke-width="1"/>
+      <text class="svg-t-b" x="188" y="24">Apache + OIDC</text>
+      <line x1="248" y1="36" x2="248" y2="300" stroke="var(--border)" stroke-width="1"/>
+      <text class="svg-t-b" x="408" y="24">serveur_web</text>
+      <line x1="452" y1="36" x2="452" y2="300" stroke="var(--border)" stroke-width="1"/>
+      <text class="svg-t-b" x="590" y="24">MariaDB</text>
+      <line x1="622" y1="36" x2="622" y2="300" stroke="var(--border)" stroke-width="1"/>
+      <text class="svg-t-b" x="700" y="24">client/infra</text>
+      <line x1="746" y1="36" x2="746" y2="300" stroke="var(--border)" stroke-width="1"/>
+
+      <!-- 1 -->
+      <path class="svg-arrow" marker-end="url(#fl3)" d="M60 62 H248"/>
+      <text class="svg-t-sm" x="68" y="56">clic &laquo; emettre un jeton &raquo;</text>
+      <!-- 2 -->
+      <path class="svg-arrow" marker-end="url(#fl3)" d="M248 92 H452"/>
+      <text class="svg-t-sm" x="256" y="86">POST /api/token + X-Remote-User</text>
+      <!-- 3 -->
+      <path class="svg-arrow-accent" marker-end="url(#fl3)" d="M452 122 H622"/>
+      <text class="svg-t-sm" x="460" y="116">INSERT empreinte SHA-256</text>
+      <!-- 4 -->
+      <path class="svg-arrow-accent" marker-end="url(#fl3)" d="M452 152 H60"/>
+      <text class="svg-t-sm" x="68" y="146">jeton en clair, affiche une seule fois</text>
+      <!-- 5 -->
+      <path class="svg-arrow" marker-end="url(#fl3)" d="M60 182 H746"/>
+      <text class="svg-t-sm" x="400" y="176">copie manuelle vers le poste</text>
+      <!-- 6 -->
+      <path class="svg-arrow-accent" marker-end="url(#fl3)" d="M746 212 H452"/>
+      <text class="svg-t-sm" x="470" y="206">GET /api/inventaire &middot; Bearer</text>
+      <!-- 7 -->
+      <path class="svg-arrow-accent" marker-end="url(#fl3)" d="M452 242 H622"/>
+      <text class="svg-t-sm" x="460" y="236">UPDATE consomme_le, consomme_de</text>
+      <!-- 8 -->
+      <path class="svg-arrow-accent" marker-end="url(#fl3)" d="M452 272 H746"/>
+      <text class="svg-t-sm" x="490" y="266">inventaire complet &rarr; cache local</text>
+
+      <!-- rejeu -->
+      <line x1="14" y1="292" x2="786" y2="292" stroke="var(--border)" stroke-width="1" stroke-dasharray="4 3"/>
+      <text class="svg-t-sm" x="14" y="312">Rejeu du meme jeton : consomme_le est deja renseigne &rarr; 403. Jeton perime &rarr; 403. Jeton absent &rarr; 401.</text>
+    </svg>
+    <figcaption><strong>La base ne contient que l'empreinte.</strong> Un vol de la base ne donne aucun jeton utilisable, et l'affichage unique cote web signifie qu'un jeton non recupere est perdu plutot que recuperable. <code>consomme_de</code> enregistre l'IP du poste qui l'a echange : c'est la trace d'audit qui relie un compte Authentik a une execution.</figcaption>
+  </figure>
+
+  <h3>Routes du service</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Route</th><th>Methode</th><th>Authentification</th><th>Reponse</th></tr></thead>
+      <tbody>
+        <tr><td class="col-mono">/api/token</td><td class="col-mono">POST</td><td>En-tete <code>X-Remote-User</code> pose par Apache</td><td>Jeton en clair, une seule fois</td></tr>
+        <tr><td class="col-mono">/api/inventaire</td><td class="col-mono">GET</td><td><code>Authorization: Bearer</code>, consomme le jeton</td><td>Inventaire Ansible complet</td></tr>
+        <tr><td class="col-mono">/api/sante</td><td class="col-mono">GET</td><td>Aucune</td><td>Age du snapshot, compteurs <span class="pill ok">ok</span> <span class="pill warn">degrade</span></td></tr>
+        <tr><td class="col-mono">/</td><td class="col-mono">GET</td><td>Aucune</td><td>Le schema, si <code>--page</code> est fourni</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <span class="titre">Pourquoi l'identite vient d'un en-tete</span>
+    <p>Le service n'ecoute que sur <code>127.0.0.1</code>. Il ne peut donc recevoir que du trafic deja passe par Apache, qui a valide la session OIDC et pose <code>X-Remote-User</code>. Le jour ou le service serait expose directement, cet en-tete devient falsifiable par n'importe qui : l'ecoute locale <em>est</em> le controle d'acces, pas une commodite.</p>
+  </div>
+</section>
+
+<section id="bastion">
+  <h2><span class="num">08</span>Bastion et acces</h2>
+  <p class="sous">The Bastion est l'autorite d'acces : comptes nominatifs, droits par groupe, traces centralisees. Le comparatif ne modifie rien, il expose les ecarts entre ce qui existe et ce qui est joignable.</p>
+
+  <h3>Les trois etats</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Etat</th><th>Signification</th><th>Action attendue</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="pill ok">declare</span></td>
+          <td>La machine est dans l'inventaire et un acces la couvre.</td>
+          <td>Rien.</td>
+        </tr>
+        <tr>
+          <td><span class="pill danger">manquant</span></td>
+          <td>Machine inventoriee, dans le perimetre, mais aucun acces ne la couvre.</td>
+          <td><code>groupAddServer</code> &mdash; commande generee par <code>--bastion-commands</code>, jamais executee automatiquement.</td>
+        </tr>
+        <tr>
+          <td><span class="pill warn">hors perimetre</span></td>
+          <td>Exclusion deliberee : <code>os: win*</code>, tag <code>no-bastion</code>, ou hote liste.</td>
+          <td>Rien, mais l'exclusion reste visible dans le rapport.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Aujourd'hui le hors-perimetre represente moins de 10&nbsp;% du parc, essentiellement les Windows. L'interet de l'etat explicite est qu'il ne se confond pas avec un oubli : une machine absente du bastion est soit un trou, soit une decision, et le rapport les distingue.</p>
+
+  <h3>Couverture d'un acces</h3>
+  <p>La fonction <code>couvre()</code> accepte une adresse seule ou un CIDR, et des jokers sur l'utilisateur et le port. Un acces <code>10.0.0.0/24 &middot; root &middot; 22</code> couvre bien <code>10.0.0.42</code> en root sur 22, mais pas le meme hote en <code>ansible</code> : la distinction compte, puisque les noeuds se joignent en <code>root</code> et les invites en <code>ansible</code>.</p>
+
+  <div class="note attention">
+    <span class="titre">Non eprouve</span>
+    <p>La structure reelle de <code>selfListAccesses --json-greppable</code> n'a pas ete observee sur une instance vivante. <code>acces_depuis_charge()</code> visite l'arbre JSON de facon defensive, mais la premiere execution reelle demandera probablement un ajustement. Capture la sortie brute dans un fichier et passe-la a <code>--acces</code> avant de brancher <code>--commande</code>.</p>
+  </div>
+</section>
+
+<section id="secrets">
+  <h2><span class="num">09</span>Secrets</h2>
+  <p class="sous">Trois sources, par ordre de preference. Le principe : aucun secret en clair sur le disque, et aucun secret dans l'environnement du processus.</p>
+
+  <figure>
+    <svg viewBox="0 0 740 280" role="img" aria-label="Le TPM ou la cle hote dechiffre les fichiers .cred vers un tmpfs lisible par le seul service, que les scripts Python consultent avant l'environnement.">
+      <defs>
+        <marker id="fl4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <polygon points="0,1 10,5 0,9" fill="context-stroke" stroke="none"/>
+        </marker>
+      </defs>
+
+      <text class="svg-t-sm" x="14" y="20">AU REPOS &mdash; sur le disque</text>
+      <rect class="svg-box" x="14" y="32" width="200" height="74" rx="7"/>
+      <text class="svg-t-b" x="28" y="54">/etc/.../creds/</text>
+      <text class="svg-t-sm" x="28" y="72">pve_token.cred</text>
+      <text class="svg-t-sm" x="28" y="88">ovh_application_key.cred</text>
+      <text class="svg-t-sm" x="28" y="102">&hellip; chmod 600</text>
+
+      <rect class="svg-box-accent" x="14" y="132" width="200" height="56" rx="7"/>
+      <text class="svg-t-b" x="28" y="154">TPM2</text>
+      <text class="svg-t-sm" x="28" y="172">ou cle hote /var/lib/systemd</text>
+
+      <path class="svg-arrow-accent" marker-end="url(#fl4)" d="M114 132 V110"/>
+
+      <text class="svg-t-sm" x="276" y="20">AU DEMARRAGE DU SERVICE</text>
+      <rect class="svg-box-accent" x="276" y="32" width="196" height="74" rx="7"/>
+      <text class="svg-t-b" x="290" y="54">LoadCredentialEncrypted</text>
+      <text class="svg-t-sm" x="290" y="74">dechiffre vers un tmpfs</text>
+      <text class="svg-t-sm" x="290" y="90">lisible par ce service seul</text>
+
+      <path class="svg-arrow-accent" marker-end="url(#fl4)" d="M214 69 H276"/>
+
+      <text class="svg-t-sm" x="534" y="20">A L'EXECUTION</text>
+      <rect class="svg-box" x="534" y="32" width="192" height="74" rx="7"/>
+      <text class="svg-t-b" x="548" y="54">secrets_infra.py</text>
+      <text class="svg-t-sm" x="548" y="74">$CREDENTIALS_DIRECTORY</text>
+      <text class="svg-t-sm" x="548" y="90">puis l'environnement</text>
+
+      <path class="svg-arrow-accent" marker-end="url(#fl4)" d="M472 69 H534"/>
+
+      <!-- repli -->
+      <rect class="svg-box" x="276" y="150" width="196" height="56" rx="7"/>
+      <text class="svg-t" x="290" y="172">inventaire-infra.env</text>
+      <text class="svg-t-sm" x="290" y="190">repli &mdash; lancement a la main</text>
+      <path class="svg-arrow svg-dash" marker-end="url(#fl4)" d="M472 178 H606 V110"/>
+
+      <line x1="14" y1="230" x2="726" y2="230" stroke="var(--border)" stroke-width="1" stroke-dasharray="4 3"/>
+      <text class="svg-t-sm" x="14" y="250">Ce que ca change : une sauvegarde, un snapshot de VM ou un disque recupere ne contiennent plus rien d'exploitable.</text>
+      <text class="svg-t-sm" x="14" y="268">Le secret n'est jamais dans /proc/&lt;pid&gt;/environ, donc pas dans un vidage memoire ni dans un ps.</text>
+    </svg>
+    <figcaption><strong>Avec TPM, les fichiers chiffres sont inutilisables sur une autre machine.</strong> Sans TPM, systemd se rabat sur une cle hote dans <code>/var/lib/systemd/</code>, lisible par root seul : la protection contre le vol de disque tient, celle contre un root compromis non.</figcaption>
+  </figure>
+
+  <h3>References dans la configuration</h3>
+  <pre><code><span class="c"># infra.yml &mdash; aucune valeur en clair</span>
+pve:
+  default_token: <span class="k">"env:PVE_TOKEN"</span>     <span class="c"># systemd-creds d'abord, puis la variable</span>
+db:
+  password: <span class="k">"env:INVENTORY_DB_PASSWORD"</span>
+
+<span class="c"># resoudre() comprend aussi la forme explicite :</span>
+  token: <span class="k">"cred:pve_token"</span>          <span class="c"># systemd-creds uniquement</span></code></pre>
+  <p><code>env:NOM</code> cherche d'abord un secret systemd nomme <code>nom</code>, puis <code>NOM</code>, puis la variable d'environnement. C'est ce qui permet de basculer une configuration existante sous <code>systemd-creds</code> sans la reecrire.</p>
+
+  <div class="note">
+    <span class="titre">Mise en place</span>
+    <p><code>deploy/chiffrer-secrets.sh</code> lit <code>/etc/inventaire-infra.env</code>, chiffre chaque variable separement, et deplace le fichier en clair vers <code>.avant-chiffrement</code> plutot que de le supprimer &mdash; si une unite n'etait pas encore convertie, le service ne demarrerait plus. Verifie que les services tournent, puis <code>shred -u</code>.</p>
+  </div>
+
+  <h3>Decision retenue &mdash; chiffrement d'enveloppe</h3>
+  <p>Les secrets sont stockes chiffres en base ; la cle maitresse qui les dechiffre reste protegee par <code>systemd-creds</code>. Deux elements separes qui doivent se rencontrer : un vidage de la base ne donne rien, et un disque recupere sans le TPM ne donne rien non plus.</p>
+
+  <figure>
+    <svg viewBox="0 0 740 250" role="img" aria-label="La cle maitresse vient du TPM et le secret chiffre vient de la base ; les deux se rencontrent en memoire du processus de collecte. Chacun pris seul est inutilisable.">
+      <defs>
+        <marker id="fl5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <polygon points="0,1 10,5 0,9" fill="context-stroke" stroke="none"/>
+        </marker>
+      </defs>
+
+      <rect class="svg-box-accent" x="14" y="38" width="208" height="64" rx="7"/>
+      <text class="svg-t-b" x="28" y="60">Cle maitresse</text>
+      <text class="svg-t-sm" x="28" y="78">TPM2 &rarr; master_key.cred</text>
+      <text class="svg-t-sm" x="28" y="94">liee a cette machine</text>
+
+      <rect class="svg-box" x="14" y="142" width="208" height="64" rx="7"/>
+      <text class="svg-t-b" x="28" y="164">secret_store</text>
+      <text class="svg-t-sm" x="28" y="182">nonce + chiffre + version</text>
+      <text class="svg-t-sm" x="28" y="198">30 jetons PVE, OVH, base</text>
+
+      <path class="svg-arrow-accent" marker-end="url(#fl5)" d="M222 70 H290 V112 H326"/>
+      <path class="svg-arrow-accent" marker-end="url(#fl5)" d="M222 174 H290 V134 H326"/>
+
+      <rect class="svg-box-accent" x="326" y="94" width="184" height="58" rx="7"/>
+      <text class="svg-t-b" x="340" y="116">AES-GCM</text>
+      <text class="svg-t-sm" x="340" y="134">aad = nom du secret</text>
+
+      <path class="svg-arrow-accent" marker-end="url(#fl5)" d="M510 123 H566"/>
+
+      <rect class="svg-box" x="566" y="94" width="160" height="58" rx="7"/>
+      <text class="svg-t-b" x="580" y="116">en memoire</text>
+      <text class="svg-t-sm" x="580" y="134">jamais ecrit sur disque</text>
+
+      <line x1="14" y1="226" x2="726" y2="226" stroke="var(--border)" stroke-width="1" stroke-dasharray="4 3"/>
+      <text class="svg-t-sm" x="14" y="244">Vol de la base : chiffres inutilisables. Vol du disque sans TPM : cle indechiffrable. Il faut les deux, sur cette machine.</text>
+    </svg>
+    <figcaption><strong>L'<code>aad</code> lie le chiffre a son nom.</strong> Sans elle, un attaquant ayant un acces en ecriture a la base pourrait deplacer le chiffre de <code>db_password</code> dans la ligne <code>pve_token</code> : le dechiffrement reussirait et la collecte presenterait le mot de passe de la base a un hyperviseur. Avec l'<code>aad</code>, le dechiffrement echoue.</figcaption>
+  </figure>
+
+  <div class="note attention">
+    <span class="titre">Trois conditions non negociables</span>
+    <p><strong>La cle maitresse uniquement dans la collecte.</strong> Le service web touche la meme base : s'il portait la cle, une faille dans le service expose derriere Apache donnerait tous les jetons. <code>LoadCredentialEncrypted=master_key</code> dans <code>inventaire-collecte.service</code>, jamais dans <code>inventaire-web.service</code>.</p>
+    <p><strong>Un compte MariaDB distinct pour le web</strong>, sans aucun droit sur <code>secret_store</code>. Les valeurs y sont chiffrees, donc illisibles sans la cle, mais il n'y a aucune raison de les lui exposer.</p>
+    <p><strong>L'outil de rotation ecrit le premier jour.</strong> Changer la cle maitresse impose de dechiffrer puis rechiffrer chaque ligne. La colonne <code>cle_version</code> permet de le faire progressivement, secret par secret, au lieu d'un basculement atomique impossible a reprendre en cas d'echec.</p>
+  </div>
+
+  <h3>La table</h3>
+  <pre><code>CREATE TABLE IF NOT EXISTS secret_store (
+  nom         VARCHAR(64)    NOT NULL,     <span class="c">-- pve_token, ovh_application_key&hellip;</span>
+  version     INT            NOT NULL,     <span class="c">-- incremente a chaque rotation</span>
+  nonce       VARBINARY(12)  NOT NULL,     <span class="c">-- unique par chiffrement, jamais reutilise</span>
+  chiffre     VARBINARY(512) NOT NULL,     <span class="c">-- valeur + tag d'authentification</span>
+  cle_version INT            NOT NULL,     <span class="c">-- quelle cle maitresse a chiffre</span>
+  cree_le     DATETIME       NOT NULL,
+  cree_par    VARCHAR(190)   NOT NULL,     <span class="c">-- qui l'a pose</span>
+  actif       TINYINT(1)     NOT NULL DEFAULT 1,
+  PRIMARY KEY (nom, version)
+);</code></pre>
+  <p>Versionner plutot qu'ecraser : l'ancienne valeur reste disponible le temps de verifier que la nouvelle fonctionne. La lecture prend la version active la plus haute.</p>
+
+  <pre><code><span class="c">-- la collecte lit et ecrit les secrets</span>
+GRANT SELECT, INSERT, UPDATE ON inventory.secret_store TO 'inventory'@'localhost';
+
+<span class="c">-- le web ne voit meme pas la table</span>
+GRANT SELECT ON inventory.v_current_inventory TO 'inventory_web'@'localhost';
+GRANT SELECT, INSERT, UPDATE ON inventory.client_token TO 'inventory_web'@'localhost';
+
+<span class="c">-- la liste complete est dans sql/setup_db.sql : table par table,
+-- jamais inventory.*, qui couvrirait secret_store et toute table ajoutee
+-- plus tard</span></code></pre>
+
+  <h3>Gestion interactive &mdash; <code>inventory --ovh</code></h3>
+  <p>Renouveler un jeton ne doit demander ni editeur, ni fichier temporaire, ni variable d'environnement qui resterait dans l'historique du shell. La saisie se fait sans echo, le jeton est teste avant d'etre ecrit, et l'ancienne version reste en place si le test echoue.</p>
+
+  <pre><code><span class="k">$</span> inventory --ovh
+
+  Cle actuelle : ovh_application_key v3, posee le 2026-08-14 par evan
+  Laisser vide pour conserver la valeur en place.
+
+  Application key    : <span class="c">[saisie masquee]</span>
+  Application secret : <span class="c">[saisie masquee]</span>
+  Consumer key       : <span class="c">[saisie masquee]</span>
+
+  Test de la signature  GET /me  . . . . . . . . . <span class="k">[OK]</span>  compte ab12345-ovh
+  Test du droit de lecture  GET /dedicated/server  <span class="k">[OK]</span>  31 serveurs
+  Test du droit  GET /dedicated/server/*/serviceInfos  <span class="k">[OK]</span>
+
+  Enregistre : ovh_application_key v4, ovh_application_secret v4, ovh_consumer_key v4
+  Version precedente conservee (v3), inactive.</code></pre>
+
+  <p>Le cas d'echec compte autant que le cas nominal :</p>
+  <pre><code>  Test de la signature  GET /me  . . . . . . . . . <span class="k">[KO]</span>
+  INVALID_SIGNATURE &mdash; la cle ou le secret ne correspondent pas.
+
+  Rien n'a ete ecrit. La cle v3 reste active.</code></pre>
+
+  <h3>Pseudo-code</h3>
+  <pre><code>commande --ovh:
+    etat = lire_version_active("ovh_application_key")
+    afficher etat                       <span class="c"># version, date, auteur</span>
+
+    valeurs = {}
+    pour chaque champ dans (app_key, app_secret, consumer_key):
+        saisie = lire_sans_echo(invite)          <span class="c"># getpass</span>
+        si saisie est vide:
+            si une valeur existe deja -> reprendre l'ancienne
+            sinon -> erreur, champ obligatoire
+        sinon:
+            valeurs[champ] = saisie.strip()      <span class="c"># un espace colle tue la signature</span>
+
+    <span class="c"># tester AVANT d'ecrire : un jeton KO ne remplace jamais un jeton OK</span>
+    resultat = tester(valeurs)
+    si resultat.echec:
+        afficher resultat.motif
+        sortir 1                        <span class="c"># rien n'a ete ecrit</span>
+
+    cle, cle_version = charger_cle_maitresse()   <span class="c"># $CREDENTIALS_DIRECTORY/master_key</span>
+    dans une transaction:
+        pour chaque champ, valeur dans valeurs:
+            nonce  = octets_aleatoires(12)
+            chiffre = aead_chiffrer(cle, nonce, valeur, aad=champ)
+            v = version_active(champ) + 1
+            inserer(champ, v, nonce, chiffre, cle_version, maintenant, utilisateur)
+            desactiver(champ, v - 1)             <span class="c"># conservee, plus active</span>
+
+    afficher le resume
+
+
+tester(valeurs):
+    client = OvhClient(endpoint, *valeurs)
+    <span class="c"># /me valide la signature : si elle passe, les cles sont bonnes</span>
+    si echec sur /me                     -> KO, distinguer signature / reseau
+    <span class="c"># les chemins metier valident les droits de la cle consommateur</span>
+    si echec sur /dedicated/server       -> KO, droit manquant, et lequel
+    rendre OK + nb de serveurs vus</code></pre>
+
+  <div class="note">
+    <span class="titre">Pourquoi deux tests distincts</span>
+    <p>C'est la distinction que <code>ovh_inventory.py</code> fait deja, et elle vaut d'etre rendue visible ici. Une signature invalide est fatale &mdash; rien ne marchera. Un droit manquant laisse la collecte fonctionner avec des champs vides. Afficher les deux separement evite de passer une heure a regenerer des cles correctes parce que la vraie cause etait un droit absent sur la cle consommateur.</p>
+  </div>
+
+  <div class="note">
+    <span class="titre">Les autres sous-commandes</span>
+    <p>Meme forme pour <code>--pve &lt;hote&gt;</code>, qui teste <code>/version</code> puis <code>/cluster/status</code> sur le noeud concerne &mdash; avec l'epinglage du certificat, comme la collecte, puisqu'un jeton valide sans epinglage et utilise ensuite avec epinglage ne prouve rien. Aucune sous-commande n'accepte de valeur en argument : un <code>ps</code> l'exposerait a tous les utilisateurs de la machine.</p>
+  </div>
+
+  <div class="note attention">
+    <span class="titre">Deux sous-commandes qui ne suivent pas la regle</span>
+    <p><code>--db</code> n'ecrit rien en base. Le mot de passe de la base ne peut pas y vivre, donc la commande teste puis affiche les trois etapes a executer. Son test echoue forcement au premier passage, avant que le <code>ALTER USER</code> soit joue : c'est pourquoi elle rend <code>0</code> dans les deux cas, et dit laquelle des deux situations on a.</p>
+    <p><code>--init-key</code> et <code>--rotate-key</code> (sans <code>--appliquer</code>) n'ouvrent pas la base du tout. Tirer une clef ne doit pas dependre d'un service qui n'y a aucun role, et ces commandes servent justement quand rien n'est encore en place.</p>
+  </div>
+
+  <h3>Rotation de la clef maitresse</h3>
+  <p>En trois temps, parce que les deux clefs doivent etre lisibles pendant le rechiffrement.</p>
+  <pre><code><span class="c"># 1. sceller la clef a venir, sans toucher l'actuelle</span>
+inventory --rotate-key | sudo systemd-creds encrypt \
+    --name=master_key_nouvelle - \
+    /etc/inventaire-infra/creds/master_key_nouvelle.cred
+
+<span class="c"># 2. charger les DEUX clefs dans l'unite, puis rechiffrer</span>
+inventory --rotate-key --appliquer
+
+  ovh_application_key ......... [OK]  v5 en clef v2
+  pve_token_ns1234_ip_1_2_3_eu  [OK]  v2 en clef v2
+  31 rechiffre(s), 0 echec(s).
+
+<span class="c"># 3. permuter les fichiers .cred, retirer master_key_nouvelle</span></code></pre>
+  <p>Le rechiffrement se fait secret par secret, pas en une transaction : trente secrets ne se reprennent pas si la machine tombe au milieu. La colonne <code>cle_version</code> dit ou on s'est arrete, une seconde execution reprend le reste, et <code>--list</code> signale de lui-meme une rotation inachevee quand deux versions de clef coexistent.</p>
+</section>
+
+<section id="deploiement">
+  <h2><span class="num">10</span>Deploiement</h2>
+  <p class="sous">Une VM Linux porte la collecte, le service web et la base. Le poste de l'operateur ne porte que le client.</p>
+
+  <h3>Cote serveur</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Element</th><th>Role</th></tr></thead>
+      <tbody>
+        <tr><td class="col-mono">deploy/installer.sh</td><td>Copie le projet, cree le compte de service, installe les unites. Copie bien <code>deploy/</code>, puisque le service lance <code>deploy/collecte.sh</code>.</td></tr>
+        <tr><td class="col-mono">inventaire-collecte.service</td><td>Unite durcie, declenchee par le timer. Porte les secrets de collecte.</td></tr>
+        <tr><td class="col-mono">inventaire-collecte.timer</td><td>Cadence de la collecte.</td></tr>
+        <tr><td class="col-mono">inventaire-web.service</td><td>Service HTTP sur la boucle locale. N'a besoin que de l'acces en lecture a la base.</td></tr>
+        <tr><td class="col-mono">deploy/collecte.sh</td><td>Verrou <code>flock</code>, lance la collecte puis republie la page. Une page non regeneree n'invalide pas la collecte.</td></tr>
+        <tr><td class="col-mono">apache-inventaire.conf</td><td>Terminaison TLS, OIDC Authentik, proxy vers <code>127.0.0.1:8080</code>.</td></tr>
+        <tr><td class="col-mono">chiffrer-secrets.sh</td><td>Bascule des secrets sous <code>systemd-creds</code>.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note attention">
+    <span class="titre">Deux pieges de durcissement</span>
+    <p><code>IPAddressDeny=any</code> aurait bloque l'acces a une MariaDB distante. La directive est commentee dans l'unite, avec l'explication : la reactiver suppose une base locale ou une regle d'autorisation explicite.</p>
+    <p>Les scripts shell doivent arriver en <abbr title="fin de ligne Unix">LF</abbr>. Sous Windows, <code>Path.write_text</code> reintroduit des CRLF et rend le script illisible par <code>bash</code>. D'ou l'ecriture binaire cote Python et <code>.gitattributes</code> cote depot.</p>
+  </div>
+
+  <h3>Cote poste operateur</h3>
+  <pre><code><span class="c"># recuperer l'inventaire avec un jeton pris sur la page web</span>
+infra update --token &lt;jeton&gt; --url https://inventaire.exemple.net
+
+<span class="c"># explorer sans rien executer</span>
+infra list web           <span class="c"># filtre sur le nom ou les tags</span>
+infra list --groupes
+
+<span class="c"># verifier puis agir</span>
+infra simulate playbook.yml --limit cluster_prod1
+infra run      playbook.yml --limit cluster_prod1</code></pre>
+  <p>Le cache local a une duree de vie de quelques heures. <code>run</code> demande confirmation sauf avec <code>--oui</code>, et <code>simulate</code> est un <code>--check</code> : les deux partagent exactement la meme construction de cibles, pour qu'une simulation valide corresponde a l'execution.</p>
+</section>
+
+<section id="config">
+  <h2><span class="num">11</span>Configuration</h2>
+  <p class="sous">Un seul fichier, <code>infra.yml</code>, lu par tous les modules via <code>--config</code> ou <code>$INFRA_CONFIG</code>. Aucune valeur sensible n'y figure en clair.</p>
+
+  <pre><code>ovh:
+  endpoint: ovh-eu              <span class="c"># api.ovh.com/1.0 &mdash; voir la note ci-dessous</span>
+  config: ~/.ovh.conf
+
+pve:
+  port: 8006
+  pin_certs: true               <span class="c"># epinglage plutot que verify=False</span>
+  pin_dir: pinned
+  default_token: "env:PVE_TOKEN"
+  tokens: {}                    <span class="c"># par hote, si un cluster a son propre jeton</span>
+  skip: []
+  detail: true                  <span class="c"># interroge l'agent QEMU pour les IP et l'OS</span>
+
+cache:
+  path: .infra_cache.json
+  ttl: 900
+
+ansible:
+  comptes:
+    node: root                  <span class="c"># les hyperviseurs</span>
+    vm: ansible                 <span class="c"># les invites</span>
+  bastion:
+    host: bastion.exemple.net
+    groupe: infra-prod
+    actif: false
+    hors_perimetre:
+      os: ["win*"]
+      tags: ["no-bastion"]
+
+db:
+  host: 127.0.0.1
+  user: inventory
+  password: "env:INVENTORY_DB_PASSWORD"
+  auto_schema: true
+  keep_runs: 200                <span class="c"># purge au-dela</span></code></pre>
+
+  <div class="note">
+    <span class="titre">L'endpoint OVH</span>
+    <p><code>eu.api.ovh.com</code> sert un certificat auto-signe, alors que le DNS est coherent et que les autres hotes repondent correctement. L'endpoint retenu est <code>api.ovh.com/1.0</code> ; l'ancien reste disponible sous la clef <code>ovh-eu-alt</code>.</p>
+  </div>
+
+  <div class="note">
+    <span class="titre">Identifiants invalides contre droits manquants</span>
+    <p>Le client OVH distingue les deux. Un <code>INVALID_KEY</code> ou <code>INVALID_SIGNATURE</code> est fatal : rien ne marchera, autant s'arreter. Un simple refus sur un chemin signifie que la clef consommateur manque un droit : le module continue et le champ reste vide. Sans cette distinction, une clef revoquee produisait un inventaire vide mis en cache, qui masquait l'erreur pendant 15 minutes.</p>
+  </div>
+</section>
+
+<section id="reste">
+  <h2><span class="num">12</span>Ce qui reste</h2>
+  <p class="sous">L'etat honnete du projet : ce qui a tourne pour de vrai, et ce qui n'a jamais rencontre la realite.</p>
+
+  <h3>Eprouve</h3>
+  <ul>
+    <li>Collecte reelle de bout en bout : 1 dedie, 3 VM, snapshot en base.</li>
+    <li>Parc genere a l'echelle : 30 dedies, 308 invites, 338 hotes, 66 groupes, 378 cartes rendues en 16&nbsp;ms.</li>
+    <li>Flux du jeton complet : emission depuis la page, consommation par le client, refus au rejeu.</li>
+    <li><code>simulate</code> et <code>run</code> valides avec Ansible 2.14.</li>
+  </ul>
+
+  <h3>Non eprouve</h3>
+  <ul>
+    <li><strong>Deduplication de cluster</strong> sur un vrai parc &mdash; les donnees generees sont deja dedupliquees.</li>
+    <li><strong>Structure de <code>selfListAccesses</code></strong> sur une instance vivante du bastion.</li>
+    <li><strong>Vhost Apache</strong> avec un vrai Authentik : le parcours OIDC complet n'a pas ete suivi.</li>
+    <li><strong>Installation reelle</strong> : seule une simulation a tourne.</li>
+  </ul>
+
+  <h3>Eprouve sans base</h3>
+  <p>Ce qui se teste sur un poste nu l'a ete : les 16 tests du chiffrement,
+  la generation de clef, le refus de saisie non interactive, les messages
+  d'erreur, et <code>--list</code> sur une fausse connexion &mdash; y compris
+  sa detection d'une rotation inachevee.</p>
+
+  <h3>Ecrit, jamais execute</h3>
+  <p>Tout ce qui ecrit. Ces quatre blocs se relisent mais n'ont jamais
+  rencontre une vraie base : c'est le gros du risque restant.</p>
+  <ul>
+    <li><strong>La couche SQL de <code>secret_store</code></strong> &mdash; <code>lire</code>, <code>ecrire</code> et <code>lister</code>.</li>
+    <li><strong>Le DDL et les <code>GRANT</code></strong> &mdash; dont les deux requetes de verification en fin de <code>setup_db.sql</code>, qui doivent ne rien renvoyer.</li>
+    <li><strong>La resolution <code>db:</code></strong> &mdash; testee sur le chemin d'echec, jamais sur le chemin nominal.</li>
+    <li><strong>Les sous-commandes qui ecrivent</strong> &mdash; <code>--ovh</code>, <code>--pve</code>, <code>--rotate-key --appliquer</code>.</li>
+  </ul>
+
+  <h3>A ecrire</h3>
+  <ul>
+    <li>MFA sur le parcours web : prevu, pas commence.</li>
+  </ul>
+
+  <h3>Sur la VM</h3>
+  <p>Le detail est dans <code>docs/deploiement.md</code>, que l'installeur
+  copie sur la machine : dix etapes dans l'ordre ou elles doivent se faire,
+  chacune avec sa verification, et une section de retour arriere par gravite
+  croissante. Les grandes lignes :</p>
+  <ol class="liste">
+    <li>La base et les <strong>deux</strong> comptes, puis les deux requetes de verification &mdash; une ligne renvoyee signifie que la separation ne tient pas.</li>
+    <li>Une collecte sur un seul hote, secrets encore en clair. C'est la qu'on eprouve la deduplication de cluster : un cluster a trois noeuds, dont un volontairement eteint.</li>
+    <li>Sceller la clef maitresse, dans l'unite de collecte uniquement.</li>
+    <li>Chiffrer le reste, basculer les unites, verifier que le journal dit <code>secrets fournis par systemd-creds</code> avant de <code>shred</code> quoi que ce soit.</li>
+    <li>Basculer les jetons PVE en base, un hote d'abord. Premier test du chemin nominal de <code>db:</code>.</li>
+  </ol>
+
+  <div class="note attention">
+    <span class="titre">Deux pieges trouves en ecrivant le runbook</span>
+    <p>Rejouer <code>setup_db.sql</code> sur une base creee par <code>setup_inventory_db.py</code> <strong>ecrase le mot de passe du compte de collecte</strong> par le marqueur du fichier : ses <code>ALTER USER</code> le rendent rejouable, mais le script Python a deja fait la base, le compte et le schema. Les deux voies sont decrites separement dans le runbook.</p>
+    <p>La clef maitresse est un point de non-retour. La perdre rend tous les secrets en base definitivement illisibles, et comme elle est liee a la machine, une sauvegarde restauree ailleurs ne la dechiffrera pas. Les snapshots d'inventaire, eux, ne sont pas chiffres.</p>
+  </div>
+
+  <h3>En suspens</h3>
+  <ul>
+    <li>Push GitHub : la clef publique <code>ssh-ed25519 &hellip; Sazuro425</code> doit etre ajoutee au compte. Le remote est deja en SSH, les clefs d'hote verifiees contre <code>api.github.com/meta</code>.</li>
+    <li>Cinq fichiers indexes mais pas encore commites : <code>.gitignore</code>, <code>.gitattributes</code>, <code>secrets_infra.py</code>, <code>deploy/chiffrer-secrets.sh</code>, <code>docs/architecture.html</code>.</li>
+  </ul>
+</section>
+
+</main>
+</div>
