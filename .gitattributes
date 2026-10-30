@@ -1,0 +1,5 @@
+# Le projet s'execute sous Linux : fins de ligne Unix imposees, sinon un
+# clone sous Windows reintroduit des CRLF qui cassent les scripts shell.
+* text=auto eol=lf
+*.png binary
+*.pem text eol=lf

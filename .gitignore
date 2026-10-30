@@ -1,0 +1,31 @@
+# Secrets et etat local : rien de tout cela ne doit etre versionne.
+
+# Cles API, tokens, mots de passe
+*.env
+!deploy/*.env.example
+.ovh.conf
+inventaire-oidc.conf
+!deploy/inventaire-oidc.conf.example
+
+# Certificats epingles : propres a chaque poste, et leur confiance vient de
+# la premiere connexion, pas du depot
+pinned/
+*.pem
+!deploy/*.pem.example
+
+# Etat local
+.infra_cache.json
+exports/
+*.bak
+*.tmp
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editeurs
+.vscode/
+.idea/
+*.swp
