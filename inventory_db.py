@@ -530,13 +530,24 @@ def lister_ventes(conn, vm=None, actives=True):
 
 
 def rentabilite(conn):
-    """Le resultat du parc : global, par serveur, et les contrats orphelins."""
+    """Le resultat du parc : global, par cluster, par serveur, orphelins.
+
+    Le cluster est la maille du resultat : c'est lui qui porte un cout et une
+    recette comparables. La liste par serveur est la pour le technicien, qui
+    veut savoir quel dedie porte quel cluster — elle n'affiche pas de marge
+    par serveur, qui n'aurait pas de sens.
+    """
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM v_rentabilite_globale")
             globale = cur.fetchone() or {}
-            cur.execute("SELECT * FROM v_rentabilite_serveur "
+            cur.execute("SELECT * FROM v_rentabilite_cluster "
                         "ORDER BY marge_mois ASC")
+            clusters = cur.fetchall()
+            # tri par cluster puis par nom : la liste se lit comme un
+            # trombinoscope du parc, les freres cote a cote
+            cur.execute("SELECT * FROM v_rentabilite_serveur "
+                        "ORDER BY cluster_name, reverse_name")
             serveurs = cur.fetchall()
             cur.execute("SELECT * FROM v_vente_orpheline ORDER BY vm_name")
             orphelins = cur.fetchall()
@@ -550,6 +561,7 @@ def rentabilite(conn):
     propre = lambda rows: [{k: _json_ok(v) for k, v in r.items()} for r in rows]
     return {
         "globale": {k: _json_ok(v) for k, v in globale.items()},
+        "clusters": propre(clusters),
         "serveurs": propre(serveurs),
         "orphelins": propre(orphelins),
     }

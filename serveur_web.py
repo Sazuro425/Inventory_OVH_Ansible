@@ -19,7 +19,7 @@ Routes :
     POST /api/token       emet un jeton a usage unique (identite OIDC requise)
     GET  /api/inventaire  rend l'inventaire Ansible (jeton requis, consomme)
     GET  /api/sante       etat du service, sans authentification
-    GET  /api/rentabilite cout OVH contre ventes (identite requise)
+    GET  /api/rentabilite cout OVH contre ventes, par cluster (identite requise)
     GET  /api/commercial  les ventes, ?vm=nom pour une seule
     POST /api/commercial  cree ou corrige une vente (role commercial)
     POST /api/commercial/resilier   passe un contrat a inactif
@@ -333,7 +333,7 @@ class Handler(BaseHTTPRequestHandler):
         self.repondre(200, {"resilie": True, "par": utilisateur})
 
     def rentabilite(self):
-        """Cout OVH contre ventes : par serveur, et pour tout le parc."""
+        """Cout OVH contre ventes : par cluster, par serveur, et en tout."""
         if not self.identite():
             return self.repondre(401, {"erreur": "identite absente"})
         try:

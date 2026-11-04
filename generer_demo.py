@@ -165,6 +165,18 @@ def generer(nb_dedies, vm_min, vm_max, seed, taux_cluster, taux_panne,
     for g in invites:
         g["cluster"] = cluster_par_hote.get(g["via_host"])
 
+    # Les membres, comme /cluster/status les rend : chaque noeud voit tout son
+    # cluster. Un hote injoignable, lui, ne rend rien — il n'a pas repondu.
+    par_cluster = {}
+    for p in probes:
+        if p["error"] or not p["cluster"]:
+            continue
+        par_cluster.setdefault(p["cluster"], []).append(p)
+    for lot in par_cluster.values():
+        liste = [{"name": p["node"], "ip": "", "online": 1} for p in lot]
+        for p in lot:
+            p["members"] = liste
+
     return {"servers": serveurs, "probes": probes, "guests": invites,
             "generated_at": int(time.time())}
 

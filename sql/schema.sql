@@ -309,30 +309,6 @@ CREATE OR REPLACE VIEW v_vente_active AS
   WHERE actif = 1
     AND (fin IS NULL OR fin >= CURDATE());
 
--- Un serveur et son resultat : ce qu'il coute, ce que ses VM rapportent.
--- LEFT JOIN partout : un serveur sans cout releve, ou sans aucune VM vendue,
--- doit apparaitre quand meme — c'est precisement celui qu'on cherche.
-CREATE OR REPLACE VIEW v_rentabilite_serveur AS
-  SELECT
-    s.ovh_name,
-    s.reverse_name,
-    s.offer,
-    s.datacenter,
-    s.expiration,
-    k.price_month                           AS cout_mois,
-    k.price_currency                        AS devise,
-    COALESCE(SUM(v.vente_mois), 0)          AS vente_mois,
-    COALESCE(SUM(v.vente_mois), 0) - COALESCE(k.price_month, 0)
-                                            AS marge_mois,
-    COUNT(DISTINCT g.id)                    AS nb_invites,
-    COUNT(DISTINCT v.contrat)               AS nb_contrats
-  FROM v_current_servers s
-  LEFT JOIN v_current_costs  k ON k.ovh_name = s.ovh_name
-  LEFT JOIN v_current_guests g ON g.via_host = s.reverse_name
-  LEFT JOIN v_vente_active   v ON v.vm_name  = g.name
-  GROUP BY s.ovh_name, s.reverse_name, s.offer, s.datacenter, s.expiration,
-           k.price_month, k.price_currency;
-
 -- Contrats actifs dont la VM n'est plus dans l'inventaire : soit la VM a ete
 -- detruite sans resilier, soit elle a ete renommee. Dans les deux cas on
 -- facture quelque chose qui n'existe pas.
@@ -342,19 +318,146 @@ CREATE OR REPLACE VIEW v_vente_orpheline AS
   LEFT JOIN v_current_guests g ON g.name = v.vm_name
   WHERE g.id IS NULL;
 
+-- Chaque contrat rattache a UN cluster, celui de sa VM. Passer par la vente
+-- et non par l'invite est volontaire : deux invites peuvent porter le meme
+-- nom dans deux clusters, et sommer depuis les invites compterait alors le
+-- contrat deux fois. MIN() tranche, et la somme des ventes par cluster reste
+-- egale au total des contrats non orphelins — ce qui se verifie.
+CREATE OR REPLACE VIEW v_vente_localisee AS
+  SELECT v.*,
+         (SELECT MIN(g.cluster_name) FROM v_current_guests g
+           WHERE g.name = v.vm_name) AS cluster_effectif
+  FROM v_vente_active v;
+
+-- Quel dedie porte quel cluster. C'est la vue que regarde un technicien :
+-- une ligne par serveur, avec son noeud PVE, son cluster et son cout propre.
+--
+-- Un hote jamais sonde ou injoignable n'a pas de cluster connu. Lui en
+-- fabriquer un, 'inconnu:<reverse>', le garde isole : son cout continue de
+-- compter sans etre verse dans le resultat d'un cluster auquel rien ne dit
+-- qu'il appartient.
+CREATE OR REPLACE VIEW v_serveur_cluster AS
+  SELECT
+    s.ovh_name,
+    s.reverse_name,
+    s.offer,
+    s.datacenter,
+    s.expiration,
+    n.pve_node,
+    COALESCE(n.reachable, 0)                AS reachable,
+    COALESCE(n.cluster_name,
+             CONCAT('inconnu:', s.reverse_name))  AS cluster_name,
+    (n.cluster_name IS NULL
+       OR n.cluster_name LIKE 'standalone:%')     AS seul,
+    k.price_month                           AS cout_mois,
+    k.price_currency                        AS devise
+  FROM v_current_servers s
+  LEFT JOIN v_current_nodes n ON n.host     = s.reverse_name
+  LEFT JOIN v_current_costs k ON k.ovh_name = s.ovh_name;
+
+-- Le resultat se calcule par cluster, pas par serveur.
+--
+-- Un cluster de quatre noeuds est une unite economique unique : une VM y
+-- migre librement, elle n'appartient a aucun noeud. La collecte n'interroge
+-- d'ailleurs qu'un representant par cluster, donc tous les invites portent
+-- le via_host de ce seul hote. Rapporter les ventes au serveur, c'est faire
+-- porter a un noeud la recette de ses trois freres, qui affichent alors leur
+-- cout face a zero et passent pour etre a perte. Sur un parc de 30 dedies en
+-- clusters de 2 a 4, cela designe une vingtaine de serveurs a perte sur un
+-- parc parfaitement sain.
+--
+-- Un noeud seul est un cluster d'un seul membre : les deux cas se traitent
+-- donc de la meme facon, et rien n'echappe au calcul.
+CREATE OR REPLACE VIEW v_rentabilite_cluster AS
+  SELECT
+    x.cluster_name,
+    x.seul,
+    x.nb_serveurs,
+    x.serveurs,
+    x.datacenters,
+    x.cout_mois,
+    x.serveurs_sans_cout,
+    x.devise,
+    COALESCE(i.nb_invites, 0)                              AS nb_invites,
+    COALESCE(w.nb_contrats, 0)                             AS nb_contrats,
+    COALESCE(w.vente_mois, 0)                              AS vente_mois,
+    COALESCE(w.vente_mois, 0) - COALESCE(x.cout_mois, 0)   AS marge_mois
+  FROM (
+    SELECT cluster_name,
+           MAX(seul)                  AS seul,
+           COUNT(*)                   AS nb_serveurs,
+           GROUP_CONCAT(reverse_name ORDER BY reverse_name SEPARATOR ' ')
+                                      AS serveurs,
+           GROUP_CONCAT(DISTINCT datacenter ORDER BY datacenter SEPARATOR ' ')
+                                      AS datacenters,
+           SUM(cout_mois)             AS cout_mois,
+           SUM(cout_mois IS NULL)     AS serveurs_sans_cout,
+           MIN(devise)                AS devise
+      FROM v_serveur_cluster
+     GROUP BY cluster_name
+  ) x
+  LEFT JOIN (
+    SELECT cluster_name, COUNT(*) AS nb_invites
+      FROM v_current_guests GROUP BY cluster_name
+  ) i ON i.cluster_name = x.cluster_name
+  LEFT JOIN (
+    SELECT cluster_effectif,
+           COUNT(*)         AS nb_contrats,
+           SUM(vente_mois)  AS vente_mois
+      FROM v_vente_localisee
+     WHERE cluster_effectif IS NOT NULL
+     GROUP BY cluster_effectif
+  ) w ON w.cluster_effectif = x.cluster_name;
+
+-- Une ligne par serveur : son cout propre, et le resultat du cluster dont il
+-- fait partie. Pas de marge par serveur : elle n'a pas de sens, et en
+-- afficher une serait reinstaller l'erreur qu'on vient d'ecarter.
+CREATE OR REPLACE VIEW v_rentabilite_serveur AS
+  SELECT
+    c.ovh_name,
+    c.reverse_name,
+    c.offer,
+    c.datacenter,
+    c.expiration,
+    c.pve_node,
+    c.reachable,
+    c.cluster_name,
+    c.seul,
+    c.cout_mois,
+    c.devise,
+    r.nb_serveurs   AS cluster_nb_serveurs,
+    r.serveurs      AS cluster_serveurs,
+    r.cout_mois     AS cluster_cout_mois,
+    r.vente_mois    AS cluster_vente_mois,
+    r.marge_mois    AS cluster_marge_mois,
+    r.nb_invites    AS cluster_nb_invites,
+    r.nb_contrats   AS cluster_nb_contrats
+  FROM v_serveur_cluster c
+  LEFT JOIN v_rentabilite_cluster r ON r.cluster_name = c.cluster_name;
+
 -- Le total du parc, en une ligne.
+--
+-- vente_mois compte TOUS les contrats actifs, orphelins compris : un contrat
+-- dont la VM a disparu est facture quand meme, et l'omettre ferait paraitre
+-- le parc moins rentable qu'il ne l'est. vente_hors_parc isole ce montant
+-- pour que l'ecart avec la somme des clusters soit lisible au lieu d'etre
+-- une difference inexpliquee.
 CREATE OR REPLACE VIEW v_rentabilite_globale AS
   SELECT
-    (SELECT COALESCE(SUM(price_month), 0) FROM v_current_costs)
+    (SELECT COALESCE(SUM(cout_mois), 0) FROM v_serveur_cluster)
       AS cout_mois,
-    (SELECT COUNT(*) FROM v_current_costs WHERE price_month IS NULL)
+    (SELECT COUNT(*) FROM v_serveur_cluster WHERE cout_mois IS NULL)
       AS serveurs_sans_cout,
-    (SELECT COALESCE(SUM(vente_mois), 0) FROM v_rentabilite_serveur)
+    (SELECT COALESCE(SUM(vente_mois), 0) FROM v_vente_active)
       AS vente_mois,
-    (SELECT COALESCE(SUM(vente_mois), 0) FROM v_rentabilite_serveur)
-      - (SELECT COALESCE(SUM(price_month), 0) FROM v_current_costs)
+    (SELECT COALESCE(SUM(vente_mois), 0) FROM v_vente_active)
+      - (SELECT COALESCE(SUM(cout_mois), 0) FROM v_serveur_cluster)
       AS marge_mois,
+    (SELECT COALESCE(SUM(vente_mois), 0) FROM v_vente_orpheline)
+      AS vente_hors_parc,
+    (SELECT COUNT(*) FROM v_serveur_cluster)     AS nb_serveurs,
+    (SELECT COUNT(*) FROM v_rentabilite_cluster) AS nb_clusters,
     (SELECT COUNT(*) FROM v_vente_active)        AS nb_contrats,
     (SELECT COUNT(*) FROM v_vente_orpheline)     AS nb_orphelins,
-    (SELECT COUNT(*) FROM v_rentabilite_serveur WHERE marge_mois < 0)
-      AS serveurs_a_perte;
+    (SELECT COUNT(*) FROM v_rentabilite_cluster WHERE marge_mois < 0)
+      AS clusters_a_perte;

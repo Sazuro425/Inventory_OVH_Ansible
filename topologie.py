@@ -78,6 +78,27 @@ def construire(data, acces=None, conf=None):
              for c in (data.get("costs") or [])
              if c.get("ovh_name")}
 
+    def nom_court_cluster(brut):
+        """Le nom du cluster, ou None quand il n'y en a pas de vrai.
+
+        probe_cluster() fabrique "standalone:<noeud>" pour un hote seul, et
+        un hote jamais sonde n'a rien du tout. Ce sont des clefs de calcul,
+        pas des noms : une fiche affiche "nœud seul", pas une clef interne.
+        """
+        if not brut or brut.startswith("standalone:"):
+            return None
+        return brut
+
+    def membres_lisibles(probe):
+        """Les noeuds du cluster et leur etat, tels que /cluster/status les rend."""
+        noms = []
+        for m in (probe.get("members") or []):
+            nom = m.get("name")
+            if not nom:
+                continue
+            noms.append(nom if m.get("online", 1) else nom + " (hors ligne)")
+        return ", ".join(noms) or None
+
     def euros_mois(valeur, devise="EUR"):
         if valeur is None:
             return None
@@ -133,6 +154,13 @@ def construire(data, acces=None, conf=None):
                 # le nom OVH est la clef de jointure avec le cout et, cote
                 # navigateur, avec /api/rentabilite
                 "ovh": srv.get("ovh_name") or "",
+                # le cluster, nom brut : c'est lui et non le serveur qui porte
+                # le resultat, et le navigateur en a besoin tel quel pour le
+                # joindre a /api/rentabilite. "inconnu:<reverse>" quand l'hote
+                # n'a pas ete sonde, comme dans v_serveur_cluster.
+                "cluster": ((probes_par_hote.get(srv.get("reverse")) or {})
+                            .get("cluster")
+                            or "inconnu:" + (srv.get("reverse") or "")),
                 "libelle": "Serveur dédié", "titre": srv.get("reverse") or "",
                 "lignes": [l for l in (
                     offre or None,
@@ -170,6 +198,9 @@ def construire(data, acces=None, conf=None):
                                       "inconnu": "IP inconnue"}.get(
                         etat_acces(srv.get("ip"), "root", srv.get("os"),
                                    None, srv.get("reverse"))),
+                    "Cluster": nom_court_cluster(
+                        (probes_par_hote.get(srv.get("reverse")) or {})
+                        .get("cluster")),
                     "Coût OVH": euros_mois(
                         couts.get(srv.get("ovh_name") or "")),
                 },
@@ -187,6 +218,7 @@ def construire(data, acces=None, conf=None):
                     "libelle": "Hyperviseur", "titre": probe["host"],
                     "lignes": [str(probe["error"])[:54]],
                     "etat": "unreachable", "badge": None,
+                    "cluster": "inconnu:" + probe["host"],
                     "meta": {"dc": dc, "etat": "unreachable"},
                     "recherche": (probe["host"] + " injoignable").lower(),
                     "fiche": {"Hôte": probe["host"], "État": "injoignable",
@@ -212,13 +244,16 @@ def construire(data, acces=None, conf=None):
                     "{} invité(s)".format(len(siens)),
                 ],
                 "etat": "running", "badge": None,
+                "cluster": cluster,
                 "meta": {"dc": dc, "cluster": nom_cluster, "etat": "running"},
                 "recherche": " ".join(filter(None, [
                     probe.get("node"), probe["host"], cluster,
                     hw.get("cpu_model"), hw.get("pve_version")])).lower(),
                 "fiche": {
                     "Nœud": probe.get("node"), "Hôte": probe["host"],
-                    "Cluster": nom_cluster, "Version PVE": hw.get("pve_version"),
+                    "Cluster": nom_cluster,
+                    "Membres": membres_lisibles(probe) if not seul else None,
+                    "Version PVE": hw.get("pve_version"),
                     "Noyau": hw.get("kernel"), "Processeur": hw.get("cpu_model"),
                     "Sockets / cœurs / threads": "{} / {} / {}".format(
                         hw.get("cpu_sockets") or "?", hw.get("cpu_cores") or "?",
@@ -250,6 +285,7 @@ def construire(data, acces=None, conf=None):
                     # que le commercial connait, pas le vmid
                     "vm": g.get("name") or "",
                     "ovh": srv.get("ovh_name") or "",
+                    "cluster": cluster,
                     "libelle": "Machine virtuelle" if type_g == "qemu"
                                else "Conteneur",
                     "titre": "{} · {}".format(g.get("vmid"), g.get("name") or ""),
@@ -279,6 +315,7 @@ def construire(data, acces=None, conf=None):
                         "IPv4": g.get("ipv4"), "Uptime": g.get("uptime"),
                         "Étiquettes": g.get("tags"),
                         "Nœud": probe.get("node"),
+                        "Cluster": nom_cluster,
                         "Serveur": srv.get("reverse"),
                         "Accès bastion": {"ok": "déclaré", "manquant": "ABSENT",
                                           "inconnu": "IP inconnue"}.get(

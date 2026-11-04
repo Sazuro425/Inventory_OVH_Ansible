@@ -38,9 +38,12 @@ GRANT SELECT ON inventory.v_current_costs TO 'inventory_web'@'localhost';
 
 -- Rentabilite : des vues, donc rien de plus que ce que les tables ci-dessus
 -- et commercial contiennent deja.
+GRANT SELECT ON inventory.v_serveur_cluster     TO 'inventory_web'@'localhost';
+GRANT SELECT ON inventory.v_rentabilite_cluster TO 'inventory_web'@'localhost';
 GRANT SELECT ON inventory.v_rentabilite_serveur TO 'inventory_web'@'localhost';
 GRANT SELECT ON inventory.v_rentabilite_globale TO 'inventory_web'@'localhost';
 GRANT SELECT ON inventory.v_vente_active        TO 'inventory_web'@'localhost';
+GRANT SELECT ON inventory.v_vente_localisee     TO 'inventory_web'@'localhost';
 GRANT SELECT ON inventory.v_vente_orpheline     TO 'inventory_web'@'localhost';
 
 -- Volet commercial : la seule table que ce compte ecrit, et la seule donnee

@@ -154,6 +154,12 @@
     margin:0 0 7px; font-size:11px; color:var(--doux); font-weight:600;
     text-transform:uppercase; letter-spacing:.05em;
   }
+  /* sous-titre d'une liste dans le volet : moins appuye que le titre du bloc,
+     pour que "Membres" et "Invites" se distinguent sans le concurrencer */
+  .vente h5 {
+    margin:9px 0 4px; font-size:10.5px; color:var(--doux); font-weight:600;
+    text-transform:uppercase; letter-spacing:.04em; opacity:.85;
+  }
   .vente .bilan { display:grid; grid-template-columns:auto 1fr; gap:3px 12px;
                   font-size:12px; margin-bottom:9px; }
   .vente .bilan span:nth-child(odd) { color:var(--doux); font-size:11.5px; }
@@ -600,7 +606,8 @@ document.getElementById('fiche-fermer').onclick = () => {
 // commercial, c'est l'inverse qui serait absurde.
 const commerce = {
   dispo: false, peutEcrire: false,
-  parServeur: new Map(), parVm: new Map(), globale: null,
+  parCluster: new Map(), parServeur: new Map(), parVm: new Map(),
+  globale: null,
 };
 
 const euro = (v, d) => (v === null || v === undefined || v === '') ? '—'
@@ -618,6 +625,14 @@ function signe(v) {
   return (n > 0 ? '+' : '') + euro(n);
 }
 
+// "standalone:pve-07" et "inconnu:ns1.example" sont des clusters d'un seul
+// membre, fabriques pour que le calcul n'ait qu'un cas a traiter. Ce sont des
+// clefs, pas des noms : rien a afficher a l'operateur.
+function nomCluster(c) {
+  if (!c || c.startsWith('standalone:') || c.startsWith('inconnu:')) return null;
+  return c;
+}
+
 async function chargerCommerce() {
   try {
     const [r, v] = await Promise.all([
@@ -628,6 +643,8 @@ async function chargerCommerce() {
     const rent = await r.json(), lot = await v.json();
     commerce.globale = rent.globale || null;
     commerce.peutEcrire = !!rent.peut_ecrire;
+    commerce.parCluster = new Map(
+      (rent.clusters || []).map(c => [c.cluster_name, c]));
     commerce.parServeur = new Map(
       (rent.serveurs || []).map(s => [s.ovh_name, s]));
     commerce.parVm = new Map();
@@ -666,22 +683,30 @@ function majStatCommerce() {
   zone.appendChild(chip('facturé', euro(g.vente_mois)));
   zone.appendChild(chip('résultat / mois', signe(g.marge_mois),
                         classeMarge(g.marge_mois)));
-  if (Number(g.serveurs_a_perte) > 0) {
-    zone.appendChild(chip('serveurs à perte', g.serveurs_a_perte, 'negatif'));
+  // a perte se compte par cluster : un noeud de cluster pris seul affiche son
+  // cout face a zero recette, et serait compte a perte a tort
+  if (Number(g.clusters_a_perte) > 0) {
+    zone.appendChild(chip('clusters à perte', g.clusters_a_perte, 'negatif'));
+  }
+  if (Number(g.serveurs_sans_cout) > 0) {
+    zone.appendChild(chip('serveurs sans tarif', g.serveurs_sans_cout));
   }
   if (Number(g.nb_orphelins) > 0) {
     zone.appendChild(chip('contrats orphelins', g.nb_orphelins));
   }
 }
 
-function vmDuServeur(n) {
-  // srv -> node -> vm : les petits-enfants, dedupliques par nom
+// Toutes les VM d'un cluster, d'ou qu'on clique. La collecte n'interrogeant
+// qu'un representant par cluster, les invites pendent tous sous un seul noeud
+// de l'arbre : les chercher par cluster, et non parmi les enfants du serveur
+// clique, est ce qui rend le bouton d'edition utilisable depuis n'importe
+// quel membre.
+function vmDuCluster(cluster) {
+  if (!cluster) return [];
   const vus = new Set(), sortie = [];
-  for (const noeud of (n.enfants || [])) {
-    for (const k of (noeud.enfants || [])) {
-      if (k.kind === 'vm' && k.vm && !vus.has(k.vm)) {
-        vus.add(k.vm); sortie.push(k);
-      }
+  for (const n of DONNEES.noeuds) {
+    if (n.kind === 'vm' && n.vm && n.cluster === cluster && !vus.has(n.vm)) {
+      vus.add(n.vm); sortie.push(n);
     }
   }
   return sortie.sort((a, b) => a.vm.localeCompare(b.vm));
@@ -692,6 +717,7 @@ function ficheCommerce(n) {
   zone.replaceChildren();
   if (!commerce.dispo) return;
   if (n.kind === 'srv' && n.ovh) bilanServeur(zone, n);
+  else if (n.kind === 'node' && n.cluster) bilanCluster(zone, n.cluster, null);
   else if (n.kind === 'vm' && n.vm) bilanVm(zone, n);
 }
 
@@ -703,13 +729,11 @@ function bloc(titre) {
   return d;
 }
 
-function bilanServeur(zone, n) {
-  const r = commerce.parServeur.get(n.ovh);
-  const d = bloc('Rentabilité');
-
+function grille(d) {
   const bilan = document.createElement('div');
   bilan.className = 'bilan';
-  const ligne = (k, v, classe) => {
+  d.appendChild(bilan);
+  return (k, v, classe) => {
     bilan.appendChild(Object.assign(document.createElement('span'),
                                     { textContent: k }));
     const b = document.createElement('b');
@@ -717,21 +741,95 @@ function bilanServeur(zone, n) {
     if (classe) b.className = 'marge ' + classe;
     bilan.appendChild(b);
   };
+}
+
+function note(d, texte) {
+  d.appendChild(Object.assign(document.createElement('p'),
+                              { className: 'lecture', textContent: texte }));
+}
+
+// Un dedie coute seul, mais ne rapporte pas seul : ses VM migrent entre ses
+// freres de cluster. Son cout propre et le resultat du cluster sont donc deux
+// blocs distincts, et il n'y a volontairement pas de marge par serveur.
+//
+// Sauf s'il est seul : les deux blocs diraient alors le meme cout, et repeter
+// un chiffre fait douter qu'il s'agisse du meme. Un seul bloc dans ce cas.
+function bilanServeur(zone, n) {
+  const s = commerce.parServeur.get(n.ovh);
+  const r = commerce.parCluster.get(n.cluster);
+  if (!r || Number(r.nb_serveurs) <= 1) {
+    bilanCluster(zone, n.cluster, n.ovh, s);
+    return;
+  }
+  const d = bloc('Ce serveur');
+  const ligne = grille(d);
+  ligne('Coût OVH', euro(s && s.cout_mois, s && s.devise));
+  if (s && s.pve_node) ligne('Nœud PVE', s.pve_node);
+  ligne('Cluster', nomCluster(n.cluster) || 'nœud seul');
+  if (s && (s.cout_mois === null || s.cout_mois === undefined)) {
+    note(d, 'Aucun tarif relevé pour ce serveur : il manque au coût du '
+          + 'cluster, et le résultat ci-dessous est donc optimiste.');
+  }
+  zone.appendChild(d);
+  bilanCluster(zone, n.cluster, n.ovh);
+}
+
+// Le cluster est la maille du resultat : c'est lui qui porte un cout et une
+// recette comparables. Une VM migre entre ses noeuds, elle n'appartient a
+// aucun ; repartir le resultat par serveur ferait porter a un noeud la
+// recette de ses freres, qui passeraient pour etre a perte.
+// seul : la fiche du serveur isole, qui vient alors se fondre dans ce bloc
+function bilanCluster(zone, cluster, ovhCourant, seul) {
+  const r = commerce.parCluster.get(cluster);
+  const nom = nomCluster(cluster);
+  const plusieurs = r && Number(r.nb_serveurs) > 1;
+  const d = bloc(nom ? 'Rentabilité du cluster ' + nom : 'Rentabilité');
+
+  const ligne = grille(d);
   ligne('Coût OVH', euro(r && r.cout_mois, r && r.devise));
+  if (seul && seul.pve_node) ligne('Nœud PVE', seul.pve_node);
   ligne('Facturé', euro(r && r.vente_mois));
   ligne('Résultat', r ? signe(r.marge_mois) : '—',
         classeMarge(r && r.marge_mois));
-  d.appendChild(bilan);
+  if (plusieurs) ligne('Mutualisé sur', r.nb_serveurs + ' serveurs');
 
-  if (r && r.cout_mois === null) {
-    d.appendChild(Object.assign(document.createElement('p'),
-      { className: 'lecture',
-        textContent: 'Aucun tarif relevé pour ce serveur : le résultat ' +
-                     'affiché ne compte que les ventes.' }));
+  if (!r) {
+    note(d, 'Cluster absent du calcul : relance une collecte.');
+    zone.appendChild(d);
+    return;
+  }
+  if (Number(r.serveurs_sans_cout) > 0) {
+    note(d, plusieurs
+      ? r.serveurs_sans_cout + ' serveur(s) de ce cluster sans tarif relevé : '
+        + 'le coût affiché est incomplet.'
+      : 'Aucun tarif relevé pour ce serveur : le résultat ne compte que les '
+        + 'ventes, il est donc optimiste.');
   }
 
-  const vms = vmDuServeur(n);
+  // Les membres du cluster. C'est ce qu'un technicien vient chercher : quel
+  // dedie porte quel cluster, et avec qui il le partage.
+  if (plusieurs && r.serveurs) {
+    d.appendChild(Object.assign(document.createElement('h5'),
+                                { textContent: 'Membres' }));
+    const courant = ovhCourant && commerce.parServeur.get(ovhCourant);
+    const ul = document.createElement('ul');
+    for (const nomSrv of String(r.serveurs).split(' ').filter(Boolean)) {
+      const li = document.createElement('li');
+      const ici = courant && courant.reverse_name === nomSrv;
+      li.appendChild(Object.assign(document.createElement('span'),
+        { className: 'nom',
+          textContent: nomSrv + (ici ? ' · celui-ci' : '') }));
+      ul.appendChild(li);
+    }
+    d.appendChild(ul);
+  }
+
+  // Les VM du cluster, avec le bouton de saisie : accessible depuis n'importe
+  // lequel de ses serveurs, puisque la VM n'appartient a aucun en particulier.
+  const vms = vmDuCluster(cluster);
   if (vms.length) {
+    d.appendChild(Object.assign(document.createElement('h5'),
+                                { textContent: 'Invités' }));
     const ul = document.createElement('ul');
     for (const k of vms) {
       const ventes = commerce.parVm.get(k.vm) || [];
@@ -739,8 +837,8 @@ function bilanServeur(zone, n) {
       li.appendChild(Object.assign(document.createElement('span'),
         { className: 'nom', textContent: k.vm }));
       if (ventes.length) {
-        const total = ventes.reduce((s, v) =>
-          s + (v.periode === 'an' ? v.prix_vente / 12 : v.prix_vente), 0);
+        const total = ventes.reduce((somme, v) =>
+          somme + (v.periode === 'an' ? v.prix_vente / 12 : v.prix_vente), 0);
         li.appendChild(Object.assign(document.createElement('span'),
           { className: 'prix', textContent: euro(total) }));
       } else {
@@ -761,10 +859,7 @@ function bilanServeur(zone, n) {
   }
 
   if (!commerce.peutEcrire) {
-    d.appendChild(Object.assign(document.createElement('p'),
-      { className: 'lecture',
-        textContent: 'Lecture seule : ton compte n’est pas déclaré comme ' +
-                     'commercial.' }));
+    note(d, 'Lecture seule : ton compte n’est pas déclaré comme commercial.');
   }
   zone.appendChild(d);
 }
