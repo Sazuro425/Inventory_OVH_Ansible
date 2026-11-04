@@ -148,6 +148,45 @@
   }
   .fiche .note { color:var(--doux); font-size:11.5px; margin:10px 0 0; }
 
+  /* ---------- volet commercial ---------- */
+  .vente { margin-top:12px; border-top:1px solid var(--trait); padding-top:10px; }
+  .vente h4 {
+    margin:0 0 7px; font-size:11px; color:var(--doux); font-weight:600;
+    text-transform:uppercase; letter-spacing:.05em;
+  }
+  .vente .bilan { display:grid; grid-template-columns:auto 1fr; gap:3px 12px;
+                  font-size:12px; margin-bottom:9px; }
+  .vente .bilan span:nth-child(odd) { color:var(--doux); font-size:11.5px; }
+  .vente .bilan b { font-weight:600; }
+  /* la marge est la valeur qu'on lit en diagonale : elle porte une couleur
+     ET son signe, pour rester lisible sans distinguer le rouge du vert */
+  .marge.positif { color:var(--vert); }
+  .marge.negatif { color:var(--rouge); }
+  .marge.neutre  { color:var(--doux); }
+
+  .vente ul { list-style:none; margin:0 0 8px; padding:0;
+              max-height:190px; overflow-y:auto; }
+  .vente li {
+    display:flex; align-items:center; gap:7px; padding:4px 0;
+    border-bottom:1px solid var(--trait); font-size:11.5px;
+  }
+  .vente li:last-child { border-bottom:0; }
+  .vente li .nom { flex:1 1 auto; min-width:0; overflow:hidden;
+                   text-overflow:ellipsis; white-space:nowrap; }
+  .vente li .prix { color:var(--vert); font-variant-numeric:tabular-nums; }
+  .vente li .rien { color:var(--doux); font-style:italic; }
+  .vente li button { padding:1px 7px; font-size:11px; }
+
+  .vente form { display:grid; gap:6px; margin-top:8px; }
+  .vente form label { font-size:11px; color:var(--doux); }
+  .vente form input, .vente form select { width:100%; }
+  .vente form .paire { display:grid; grid-template-columns:1fr 92px; gap:6px; }
+  .vente form .actions { display:flex; gap:6px; }
+  .vente .msg { font-size:11.5px; margin-top:7px; }
+  .vente .msg.ok { color:var(--vert); }
+  .vente .msg.ko { color:var(--rouge); }
+  .vente .lecture { font-size:11.5px; color:var(--doux); margin:6px 0 0; }
+
   .vide {
     position:absolute; inset:0; display:none; align-items:center;
     justify-content:center; color:var(--doux); font-size:13px;
@@ -171,6 +210,7 @@
 <header>
   <div class="marque">__TITRE__<small id="horodatage">—</small></div>
   <div class="stats" id="stats"></div>
+  <div class="stats" id="stats-commerce"></div>
   <div class="outils pousse">
     <input type="search" id="recherche" placeholder="Rechercher…" autocomplete="off">
     <button id="btn-filtres" title="Afficher ou masquer les filtres">Filtres</button>
@@ -213,6 +253,7 @@
     <h3 id="fiche-titre"></h3>
     <div class="type" id="fiche-type"></div>
     <dl id="fiche-corps"></dl>
+    <div id="fiche-vente"></div>
   </aside>
 </div>
 
@@ -541,12 +582,369 @@ function selectionner(n) {
     dl.appendChild(Object.assign(document.createElement('dt'), { textContent: k }));
     dl.appendChild(Object.assign(document.createElement('dd'), { textContent: v }));
   }
+  ficheCommerce(n);
   fiche.classList.add('visible');
   dessiner();
 }
 document.getElementById('fiche-fermer').onclick = () => {
   fiche.classList.remove('visible'); etat.selection = null; dessiner();
 };
+
+// -------------------------------------------------------------- commercial
+// Le cout vient du snapshot, donc du HTML. Les ventes changent entre deux
+// collectes : elles sont lues a chaud par l'API, sinon il faudrait
+// regenerer la page a chaque contrat saisi.
+//
+// Si l'API ne repond pas — page ouverte en fichier, service arrete — tout ce
+// bloc se tait. La topologie doit rester consultable sans le volet
+// commercial, c'est l'inverse qui serait absurde.
+const commerce = {
+  dispo: false, peutEcrire: false,
+  parServeur: new Map(), parVm: new Map(), globale: null,
+};
+
+const euro = (v, d) => (v === null || v === undefined || v === '') ? '—'
+  : new Intl.NumberFormat('fr-FR', { style: 'currency',
+      currency: d || 'EUR', maximumFractionDigits: 2 }).format(Number(v));
+
+function classeMarge(v) {
+  if (v === null || v === undefined) return 'neutre';
+  return Number(v) > 0 ? 'positif' : (Number(v) < 0 ? 'negatif' : 'neutre');
+}
+
+// un signe explicite : la couleur seule ne suffit pas a dire perte ou benefice
+function signe(v) {
+  const n = Number(v || 0);
+  return (n > 0 ? '+' : '') + euro(n);
+}
+
+async function chargerCommerce() {
+  try {
+    const [r, v] = await Promise.all([
+      fetch('/api/rentabilite', { headers: { Accept: 'application/json' } }),
+      fetch('/api/commercial', { headers: { Accept: 'application/json' } }),
+    ]);
+    if (!r.ok || !v.ok) throw new Error('http ' + r.status + ' / ' + v.status);
+    const rent = await r.json(), lot = await v.json();
+    commerce.globale = rent.globale || null;
+    commerce.peutEcrire = !!rent.peut_ecrire;
+    commerce.parServeur = new Map(
+      (rent.serveurs || []).map(s => [s.ovh_name, s]));
+    commerce.parVm = new Map();
+    for (const x of (lot.ventes || [])) {
+      if (!commerce.parVm.has(x.vm_name)) commerce.parVm.set(x.vm_name, []);
+      commerce.parVm.get(x.vm_name).push(x);
+    }
+    commerce.dispo = true;
+  } catch (e) {
+    commerce.dispo = false;
+  }
+  majStatCommerce();
+  if (etat.selection) {
+    const n = parId.get(etat.selection);
+    if (n) ficheCommerce(n);
+  }
+}
+
+function majStatCommerce() {
+  const zone = document.getElementById('stats-commerce');
+  zone.replaceChildren();
+  if (!commerce.dispo || !commerce.globale) return;
+  const g = commerce.globale;
+  const chip = (titre, valeur, classe) => {
+    const d = document.createElement('div');
+    d.className = 'stat';
+    const b = document.createElement('b');
+    b.textContent = valeur;
+    if (classe) b.className = 'marge ' + classe;
+    d.appendChild(b);
+    d.appendChild(Object.assign(document.createElement('span'),
+                                { textContent: titre }));
+    return d;
+  };
+  zone.appendChild(chip('coût OVH', euro(g.cout_mois)));
+  zone.appendChild(chip('facturé', euro(g.vente_mois)));
+  zone.appendChild(chip('résultat / mois', signe(g.marge_mois),
+                        classeMarge(g.marge_mois)));
+  if (Number(g.serveurs_a_perte) > 0) {
+    zone.appendChild(chip('serveurs à perte', g.serveurs_a_perte, 'negatif'));
+  }
+  if (Number(g.nb_orphelins) > 0) {
+    zone.appendChild(chip('contrats orphelins', g.nb_orphelins));
+  }
+}
+
+function vmDuServeur(n) {
+  // srv -> node -> vm : les petits-enfants, dedupliques par nom
+  const vus = new Set(), sortie = [];
+  for (const noeud of (n.enfants || [])) {
+    for (const k of (noeud.enfants || [])) {
+      if (k.kind === 'vm' && k.vm && !vus.has(k.vm)) {
+        vus.add(k.vm); sortie.push(k);
+      }
+    }
+  }
+  return sortie.sort((a, b) => a.vm.localeCompare(b.vm));
+}
+
+function ficheCommerce(n) {
+  const zone = document.getElementById('fiche-vente');
+  zone.replaceChildren();
+  if (!commerce.dispo) return;
+  if (n.kind === 'srv' && n.ovh) bilanServeur(zone, n);
+  else if (n.kind === 'vm' && n.vm) bilanVm(zone, n);
+}
+
+function bloc(titre) {
+  const d = document.createElement('div');
+  d.className = 'vente';
+  d.appendChild(Object.assign(document.createElement('h4'),
+                              { textContent: titre }));
+  return d;
+}
+
+function bilanServeur(zone, n) {
+  const r = commerce.parServeur.get(n.ovh);
+  const d = bloc('Rentabilité');
+
+  const bilan = document.createElement('div');
+  bilan.className = 'bilan';
+  const ligne = (k, v, classe) => {
+    bilan.appendChild(Object.assign(document.createElement('span'),
+                                    { textContent: k }));
+    const b = document.createElement('b');
+    b.textContent = v;
+    if (classe) b.className = 'marge ' + classe;
+    bilan.appendChild(b);
+  };
+  ligne('Coût OVH', euro(r && r.cout_mois, r && r.devise));
+  ligne('Facturé', euro(r && r.vente_mois));
+  ligne('Résultat', r ? signe(r.marge_mois) : '—',
+        classeMarge(r && r.marge_mois));
+  d.appendChild(bilan);
+
+  if (r && r.cout_mois === null) {
+    d.appendChild(Object.assign(document.createElement('p'),
+      { className: 'lecture',
+        textContent: 'Aucun tarif relevé pour ce serveur : le résultat ' +
+                     'affiché ne compte que les ventes.' }));
+  }
+
+  const vms = vmDuServeur(n);
+  if (vms.length) {
+    const ul = document.createElement('ul');
+    for (const k of vms) {
+      const ventes = commerce.parVm.get(k.vm) || [];
+      const li = document.createElement('li');
+      li.appendChild(Object.assign(document.createElement('span'),
+        { className: 'nom', textContent: k.vm }));
+      if (ventes.length) {
+        const total = ventes.reduce((s, v) =>
+          s + (v.periode === 'an' ? v.prix_vente / 12 : v.prix_vente), 0);
+        li.appendChild(Object.assign(document.createElement('span'),
+          { className: 'prix', textContent: euro(total) }));
+      } else {
+        li.appendChild(Object.assign(document.createElement('span'),
+          { className: 'rien', textContent: 'non vendue' }));
+      }
+      if (commerce.peutEcrire) {
+        const b = document.createElement('button');
+        b.textContent = ventes.length ? 'Éditer' : '+';
+        b.title = ventes.length ? 'Corriger le contrat de ' + k.vm
+                                : 'Enregistrer une vente pour ' + k.vm;
+        b.onclick = () => ouvrirFormulaire(d, k.vm, ventes[0] || null);
+        li.appendChild(b);
+      }
+      ul.appendChild(li);
+    }
+    d.appendChild(ul);
+  }
+
+  if (!commerce.peutEcrire) {
+    d.appendChild(Object.assign(document.createElement('p'),
+      { className: 'lecture',
+        textContent: 'Lecture seule : ton compte n’est pas déclaré comme ' +
+                     'commercial.' }));
+  }
+  zone.appendChild(d);
+}
+
+function bilanVm(zone, n) {
+  const ventes = commerce.parVm.get(n.vm) || [];
+  const d = bloc('Contrat');
+
+  if (ventes.length) {
+    const ul = document.createElement('ul');
+    for (const v of ventes) {
+      const li = document.createElement('li');
+      li.appendChild(Object.assign(document.createElement('span'),
+        { className: 'nom',
+          textContent: v.contrat + (v.client ? ' · ' + v.client : '') }));
+      li.appendChild(Object.assign(document.createElement('span'),
+        { className: 'prix',
+          textContent: euro(v.prix_vente, v.devise) + ' / ' + v.periode }));
+      if (commerce.peutEcrire) {
+        const b = document.createElement('button');
+        b.textContent = 'Éditer';
+        b.onclick = () => ouvrirFormulaire(d, n.vm, v);
+        li.appendChild(b);
+      }
+      ul.appendChild(li);
+    }
+    d.appendChild(ul);
+  } else {
+    d.appendChild(Object.assign(document.createElement('p'),
+      { className: 'lecture', textContent: 'Aucun contrat sur cette VM.' }));
+  }
+
+  if (commerce.peutEcrire) {
+    const b = document.createElement('button');
+    b.textContent = ventes.length ? 'Ajouter un contrat' : 'Enregistrer la vente';
+    b.onclick = () => ouvrirFormulaire(d, n.vm, null);
+    d.appendChild(b);
+  } else {
+    d.appendChild(Object.assign(document.createElement('p'),
+      { className: 'lecture',
+        textContent: 'Lecture seule : ton compte n’est pas déclaré comme ' +
+                     'commercial.' }));
+  }
+  zone.appendChild(d);
+}
+
+function champ(parent, etiquette, attrs) {
+  parent.appendChild(Object.assign(document.createElement('label'),
+    { textContent: etiquette, htmlFor: attrs.id }));
+  const i = Object.assign(document.createElement('input'), attrs);
+  parent.appendChild(i);
+  return i;
+}
+
+function ouvrirFormulaire(hote, vm, existant) {
+  const ancien = hote.querySelector('form');
+  if (ancien) ancien.remove();
+  const ancienMsg = hote.querySelector('.msg');
+  if (ancienMsg) ancienMsg.remove();
+
+  const f = document.createElement('form');
+  f.autocomplete = 'off';
+
+  f.appendChild(Object.assign(document.createElement('label'),
+    { textContent: 'VM : ' + vm }));
+
+  const contrat = champ(f, 'Numéro de contrat', {
+    id: 'v-contrat', type: 'text', required: true, maxLength: 100,
+    value: existant ? existant.contrat : '',
+  });
+
+  const paire = document.createElement('div');
+  paire.className = 'paire';
+  const prix = Object.assign(document.createElement('input'), {
+    id: 'v-prix', type: 'number', step: '0.01', min: '0', required: true,
+    placeholder: 'Prix de vente',
+    value: existant ? existant.prix_vente : '',
+  });
+  const periode = document.createElement('select');
+  for (const p of ['mois', 'an']) {
+    periode.appendChild(Object.assign(document.createElement('option'),
+      { value: p, textContent: '/ ' + p,
+        selected: existant ? existant.periode === p : p === 'mois' }));
+  }
+  paire.append(prix, periode);
+  f.appendChild(Object.assign(document.createElement('label'),
+    { textContent: 'Prix de vente', htmlFor: 'v-prix' }));
+  f.appendChild(paire);
+
+  const client = champ(f, 'Client (facultatif)', {
+    id: 'v-client', type: 'text', maxLength: 190,
+    value: existant && existant.client ? existant.client : '',
+  });
+
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const valider = Object.assign(document.createElement('button'),
+    { type: 'submit', textContent: 'Enregistrer' });
+  const annuler = Object.assign(document.createElement('button'),
+    { type: 'button', textContent: 'Annuler' });
+  annuler.onclick = () => { f.remove(); };
+  actions.append(valider, annuler);
+
+  if (existant) {
+    const resilier = Object.assign(document.createElement('button'),
+      { type: 'button', textContent: 'Résilier' });
+    resilier.onclick = () => envoyerResiliation(f, existant.contrat);
+    actions.appendChild(resilier);
+  }
+  f.appendChild(actions);
+
+  f.onsubmit = (ev) => {
+    ev.preventDefault();
+    envoyerVente(f, {
+      vm_name: vm,
+      contrat: contrat.value,
+      prix_vente: prix.value,
+      periode: periode.value,
+      client: client.value,
+    });
+  };
+
+  hote.appendChild(f);
+  contrat.focus();
+}
+
+function message(f, texte, ok) {
+  const p = f.parentElement.querySelector('.msg')
+         || f.parentElement.appendChild(document.createElement('p'));
+  p.className = 'msg ' + (ok ? 'ok' : 'ko');
+  p.textContent = texte;
+}
+
+async function envoyerVente(f, charge) {
+  const boutons = f.querySelectorAll('button');
+  boutons.forEach(b => { b.disabled = true; });
+  try {
+    const r = await fetch('/api/commercial', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(charge),
+    });
+    const rep = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      message(f, rep.erreur || ('refus (' + r.status + ')'), false);
+      return;
+    }
+    f.remove();
+    await chargerCommerce();
+    const n = etat.selection ? parId.get(etat.selection) : null;
+    if (n) {
+      const z = document.getElementById('fiche-vente');
+      const p = document.createElement('p');
+      p.className = 'msg ok';
+      p.textContent = rep.cree ? 'Vente enregistrée.' : 'Contrat corrigé.';
+      z.appendChild(p);
+    }
+  } catch (e) {
+    message(f, 'le service n’a pas répondu', false);
+  } finally {
+    boutons.forEach(b => { b.disabled = false; });
+  }
+}
+
+async function envoyerResiliation(f, contrat) {
+  if (!confirm('Résilier le contrat ' + contrat + ' ?')) return;
+  try {
+    const r = await fetch('/api/commercial/resilier', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contrat }),
+    });
+    const rep = await r.json().catch(() => ({}));
+    if (!r.ok) { message(f, rep.erreur || 'refus', false); return; }
+    f.remove();
+    await chargerCommerce();
+  } catch (e) {
+    message(f, 'le service n’a pas répondu', false);
+  }
+}
 
 // ----------------------------------------------------------------- filtres
 function construireFiltres() {
@@ -779,6 +1177,10 @@ if (!localStorage.getItem(CLE)) {
 } else {
   dessiner();
 }
+
+// Le volet commercial se charge apres le dessin : la topologie s'affiche
+// sans attendre la base, et s'enrichit quand la reponse arrive.
+chargerCommerce();
 </script>
 </body>
 </html>

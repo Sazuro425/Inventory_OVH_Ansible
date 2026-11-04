@@ -264,6 +264,21 @@ def store_run(conn, data, status=None, message=None, _deja_tente=False):
                   _num_or_none(g.get("ram_mb")), _num_or_none(g.get("disk_gb")),
                   g.get("uptime") or None, g.get("os") or None,
                   g.get("ipv4") or None, g.get("tags") or None) for g in guests])
+
+        couts = data.get("costs") or []
+        if couts:
+            cur.executemany(
+                "INSERT INTO server_cost (run_id, ovh_name, service_id, "
+                "price_value, price_currency, price_period, price_month, "
+                "next_billing, erreur) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                [(run_id, c.get("ovh_name"), c.get("service_id"),
+                  _num_or_none(c.get("price_value")),
+                  c.get("price_currency") or None,
+                  c.get("price_period") or None,
+                  _num_or_none(c.get("price_month")),
+                  _date_or_none(c.get("next_billing")),
+                  c.get("erreur") or None) for c in couts])
     except pymysql.Error as exc:
         conn.rollback()
         code = exc.args[0] if exc.args else 0
@@ -322,11 +337,34 @@ def load_latest(conn):
             "ipv4": r["ipv4"] or "", "tags": r["tags"] or "",
             "cluster": r["cluster_name"], "via_host": r["via_host"],
         } for r in cur.fetchall()]
+
+        # server_cost est arrivee apres les autres : une base qui n'a pas
+        # encore rejoue le schema doit rendre l'inventaire quand meme.
+        try:
+            cur.execute("SELECT * FROM server_cost WHERE run_id = %s",
+                        (run["id"],))
+            couts = [{
+                "ovh_name": r["ovh_name"], "service_id": r["service_id"],
+                "price_value": float(r["price_value"])
+                    if r["price_value"] is not None else None,
+                "price_currency": r["price_currency"] or "",
+                "price_period": r["price_period"] or "",
+                "price_month": float(r["price_month"])
+                    if r["price_month"] is not None else None,
+                "next_billing": r["next_billing"].isoformat()
+                    if r["next_billing"] else "",
+                "erreur": r["erreur"] or "",
+            } for r in cur.fetchall()]
+        except pymysql.Error as exc:
+            if (exc.args[0] if exc.args else 0) != 1146:
+                raise
+            couts = []
     except pymysql.Error as exc:
         raise _traduit(exc, "la lecture du snapshot") from exc
 
     return {
         "servers": servers, "probes": probes, "guests": guests,
+        "costs": couts,
         "generated_at": int(run["started_at"].timestamp()),
         "run_id": run["id"], "run_status": run["status"],
     }
@@ -344,3 +382,174 @@ def purge(conn, keep):
         supprimes = cur.rowcount
     conn.commit()
     return supprimes
+
+
+# ---------------------------------------------------------------------------
+# Volet commercial : les ventes, et la rentabilite qui en decoule.
+#
+# Ces fonctions ecrivent, contrairement a tout le reste du module qui ne fait
+# que deposer des instantanes. C'est la seule donnee de la base qu'un humain
+# saisit, donc la seule ou la validation compte vraiment : un prix negatif ou
+# un contrat vide fausserait le total du parc sans rien declencher.
+# ---------------------------------------------------------------------------
+
+PERIODES = ("mois", "an")
+DEVISES = ("EUR", "USD", "GBP", "CAD", "CHF")
+
+
+class VenteInvalide(ValueError):
+    """Saisie refusee. Le message est destine a l'utilisateur."""
+
+
+def verifier_vente(v):
+    """Normalise et controle une vente. Renvoie le dict propre a ecrire."""
+    nom = (v.get("vm_name") or "").strip()
+    contrat = (v.get("contrat") or "").strip()
+    if not nom:
+        raise VenteInvalide("le nom de la VM est obligatoire")
+    if not contrat:
+        raise VenteInvalide("le numero de contrat est obligatoire")
+    if len(nom) > 190 or len(contrat) > 100:
+        raise VenteInvalide("nom de VM ou numero de contrat trop long")
+
+    try:
+        prix = float(str(v.get("prix_vente")).replace(",", "."))
+    except (TypeError, ValueError):
+        raise VenteInvalide("le prix de vente doit etre un nombre") from None
+    if prix < 0:
+        raise VenteInvalide("le prix de vente ne peut pas etre negatif")
+    if prix > 99999999:
+        raise VenteInvalide("le prix de vente depasse ce que la colonne accepte")
+
+    periode = (v.get("periode") or "mois").strip().lower()
+    if periode not in PERIODES:
+        raise VenteInvalide("periode inconnue : attendu " + " ou ".join(PERIODES))
+
+    devise = (v.get("devise") or "EUR").strip().upper()
+    if devise not in DEVISES:
+        raise VenteInvalide("devise inconnue : " + devise)
+
+    debut, fin = _date_or_none(v.get("debut")), _date_or_none(v.get("fin"))
+    if debut and fin and fin < debut:
+        raise VenteInvalide("la date de fin precede la date de debut")
+
+    return {
+        "vm_name": nom,
+        "cluster_name": (v.get("cluster_name") or "").strip() or None,
+        "contrat": contrat,
+        "client": (v.get("client") or "").strip() or None,
+        "prix_vente": round(prix, 2),
+        "devise": devise,
+        "periode": periode,
+        "debut": debut,
+        "fin": fin,
+    }
+
+
+def enregistrer_vente(conn, vente, par):
+    """Cree la vente, ou met a jour celle qui porte deja ce numero de contrat.
+
+    Le numero de contrat est la clef : resaisir le meme contrat corrige la
+    ligne au lieu d'en ajouter une seconde. C'est ce qu'un commercial attend
+    quand il se rend compte qu'il s'est trompe de prix.
+    """
+    v = verifier_vente(vente)
+    maintenant = dt.datetime.now()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO commercial (vm_name, cluster_name, contrat, "
+                "client, prix_vente, devise, periode, debut, fin, actif, "
+                "cree_le, cree_par) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s) "
+                "ON DUPLICATE KEY UPDATE "
+                "  vm_name = VALUES(vm_name), "
+                "  cluster_name = VALUES(cluster_name), "
+                "  client = VALUES(client), "
+                "  prix_vente = VALUES(prix_vente), "
+                "  devise = VALUES(devise), "
+                "  periode = VALUES(periode), "
+                "  debut = VALUES(debut), "
+                "  fin = VALUES(fin), "
+                "  actif = 1, "
+                "  maj_le = %s, maj_par = %s",
+                (v["vm_name"], v["cluster_name"], v["contrat"], v["client"],
+                 v["prix_vente"], v["devise"], v["periode"], v["debut"],
+                 v["fin"], maintenant, par, maintenant, par))
+            # rowcount : 1 = insertion, 2 = mise a jour (convention MySQL)
+            cree = cur.rowcount == 1
+    except pymysql.Error as exc:
+        conn.rollback()
+        if (exc.args[0] if exc.args else 0) == 1146:
+            raise DbError(
+                "la table commercial n'existe pas : rejoue sql/schema.sql"
+            ) from exc
+        raise _traduit(exc, "l'enregistrement de la vente") from exc
+    conn.commit()
+    return dict(v, cree=cree)
+
+
+def desactiver_vente(conn, contrat, par):
+    """Resilie : la ligne reste, actif passe a 0. Jamais de DELETE."""
+    contrat = (contrat or "").strip()
+    if not contrat:
+        raise VenteInvalide("numero de contrat absent")
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE commercial SET actif = 0, maj_le = %s, maj_par = %s "
+                "WHERE contrat = %s AND actif = 1",
+                (dt.datetime.now(), par, contrat))
+            touche = cur.rowcount
+    except pymysql.Error as exc:
+        conn.rollback()
+        raise _traduit(exc, "la resiliation") from exc
+    conn.commit()
+    return touche > 0
+
+
+def lister_ventes(conn, vm=None, actives=True):
+    sql = "SELECT * FROM commercial"
+    where, args = [], []
+    if vm:
+        where.append("vm_name = %s")
+        args.append(vm)
+    if actives:
+        where.append("actif = 1")
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY vm_name, contrat"
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, args)
+            return [{k: _json_ok(x) for k, x in r.items()} for r in cur.fetchall()]
+    except pymysql.Error as exc:
+        if (exc.args[0] if exc.args else 0) == 1146:
+            return []
+        raise _traduit(exc, "la lecture des ventes") from exc
+
+
+def rentabilite(conn):
+    """Le resultat du parc : global, par serveur, et les contrats orphelins."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM v_rentabilite_globale")
+            globale = cur.fetchone() or {}
+            cur.execute("SELECT * FROM v_rentabilite_serveur "
+                        "ORDER BY marge_mois ASC")
+            serveurs = cur.fetchall()
+            cur.execute("SELECT * FROM v_vente_orpheline ORDER BY vm_name")
+            orphelins = cur.fetchall()
+    except pymysql.Error as exc:
+        if (exc.args[0] if exc.args else 0) in (1146, 1356):
+            raise DbError(
+                "les vues de rentabilite n'existent pas : rejoue sql/schema.sql"
+            ) from exc
+        raise _traduit(exc, "le calcul de rentabilite") from exc
+
+    propre = lambda rows: [{k: _json_ok(v) for k, v in r.items()} for r in rows]
+    return {
+        "globale": {k: _json_ok(v) for k, v in globale.items()},
+        "serveurs": propre(serveurs),
+        "orphelins": propre(orphelins),
+    }

@@ -32,6 +32,25 @@ GRANT SELECT ON inventory.v_current_nodes     TO 'inventory_web'@'localhost';
 GRANT SELECT ON inventory.v_current_guests    TO 'inventory_web'@'localhost';
 GRANT SELECT ON inventory.v_current_inventory TO 'inventory_web'@'localhost';
 
+-- Cout OVH par serveur, en lecture seule : c'est la collecte qui l'ecrit.
+GRANT SELECT ON inventory.server_cost     TO 'inventory_web'@'localhost';
+GRANT SELECT ON inventory.v_current_costs TO 'inventory_web'@'localhost';
+
+-- Rentabilite : des vues, donc rien de plus que ce que les tables ci-dessus
+-- et commercial contiennent deja.
+GRANT SELECT ON inventory.v_rentabilite_serveur TO 'inventory_web'@'localhost';
+GRANT SELECT ON inventory.v_rentabilite_globale TO 'inventory_web'@'localhost';
+GRANT SELECT ON inventory.v_vente_active        TO 'inventory_web'@'localhost';
+GRANT SELECT ON inventory.v_vente_orpheline     TO 'inventory_web'@'localhost';
+
+-- Volet commercial : la seule table que ce compte ecrit, et la seule donnee
+-- de la base saisie par un humain. SELECT, INSERT, UPDATE, et pas DELETE :
+-- une resiliation repasse actif a 0, elle n'efface pas la ligne. Ce qui a
+-- ete facture doit rester lisible, et un defaut du service web ne doit pas
+-- pouvoir faire disparaitre l'historique des ventes.
+GRANT SELECT, INSERT, UPDATE ON inventory.commercial
+  TO 'inventory_web'@'localhost';
+
 -- Jetons a usage unique : emission et consommation. Pas de DELETE — la purge
 -- des jetons perimes releve de l'administration, pas du service expose.
 GRANT SELECT, INSERT, UPDATE ON inventory.client_token
@@ -57,3 +76,21 @@ SELECT grantee, table_name, privilege_type
 SELECT grantee, privilege_type
   FROM information_schema.schema_privileges
  WHERE grantee LIKE "'inventory_web'%";
+
+-- Un DELETE ou un DROP ou que ce soit : ce compte ne detruit rien.
+SELECT grantee, table_name, privilege_type
+  FROM information_schema.table_privileges
+ WHERE grantee LIKE "'inventory_web'%"
+   AND privilege_type IN ('DELETE', 'DROP', 'ALTER', 'CREATE');
+
+
+-- ---------------------------------------------------------------------------
+-- Verification : la seule table en ecriture doit etre commercial
+--                (plus client_token, qui l'etait deja)
+-- ---------------------------------------------------------------------------
+
+SELECT table_name, GROUP_CONCAT(privilege_type ORDER BY privilege_type) AS droits
+  FROM information_schema.table_privileges
+ WHERE grantee LIKE "'inventory_web'%"
+   AND privilege_type <> 'SELECT'
+ GROUP BY table_name;

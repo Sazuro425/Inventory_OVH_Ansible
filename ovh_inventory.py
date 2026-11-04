@@ -32,6 +32,7 @@ import csv
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -263,6 +264,99 @@ def fetch_dedicated(cli, workers):
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         return list(pool.map(one, names))
+
+
+def _mois_depuis_iso(duree):
+    """P1M -> 1, P1Y -> 12, P3M -> 3. Renvoie None si on ne sait pas lire.
+
+    Le prix rendu par /services est celui de la periode d'engagement, pas du
+    mois : un serveur facture a l'annee rend 1 200 EUR / P1Y. Comparer ca au
+    prix de vente mensuel d'une VM donnerait un parc faussement a perte.
+    """
+    if not duree or not isinstance(duree, str):
+        return None
+    m = re.fullmatch(r"P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)D)?", duree.strip().upper())
+    if not m or not any(m.groups()):
+        return None
+    annees, mois, jours = (int(g or 0) for g in m.groups())
+    total = annees * 12 + mois + jours / 30.0
+    return total or None
+
+
+def fetch_costs(cli, workers):
+    """Le prix paye pour chaque serveur dedie, via l'API /services.
+
+    On passe par /services plutot que par /dedicated/server/*/serviceInfos :
+    serviceInfos donne l'echeance mais pas le montant. Une seule requete
+    liste les identifiants, puis une par service ; c'est deux fois moins
+    d'appels que de repartir du nom de chaque serveur.
+
+    Demande le droit GET /services* sur la clef OVH. Sans lui la liste
+    revient vide et la collecte continue sans les couts : connaitre son parc
+    ne doit pas dependre de savoir ce qu'il coute.
+    """
+    # Le filtre evite de parcourir les domaines et les autres produits du
+    # compte. S'il ne rend rien — filtre refuse, ou compte sans dedie — on
+    # reprend la liste entiere et on trie sur route.path.
+    ids = cli.get_safe("/services?routes=/dedicated/server", []) or []
+    if not ids:
+        ids = cli.get_safe("/services", []) or []
+    if not ids:
+        print("  couts OVH : aucun service rendu "
+              "(droit GET /services* manquant ?)", file=sys.stderr)
+        return {}
+    print("  couts OVH : {} services a examiner".format(len(ids)),
+          file=sys.stderr)
+
+    def one(sid):
+        s = cli.get_safe("/services/" + str(sid), {}) or {}
+        route = s.get("route") or {}
+        res = s.get("resource") or {}
+        # on ne garde que le dedie : le filtre de la requete a pu etre ignore
+        if not (route.get("path") or "").startswith("/dedicated/server"):
+            return None
+        # route.vars porte les variables du chemin : pour un dedie, le
+        # serviceName, qui est exactement la clef de server_snapshot.
+        nom = None
+        for v in (route.get("vars") or []):
+            if v.get("key") == "serviceName":
+                nom = v.get("value")
+                break
+        nom = nom or res.get("name")
+        if not nom:
+            return None
+
+        fac = s.get("billing") or {}
+        tar = fac.get("pricing") or {}
+        prix = tar.get("price") or {}
+        valeur = prix.get("value")
+        periode = tar.get("duration")
+        mois = _mois_depuis_iso(periode)
+
+        if valeur is not None and mois:
+            au_mois = round(float(valeur) / mois, 2)
+        elif valeur is not None and not periode:
+            # pas de periode annoncee : OVH facture au mois par defaut sur du
+            # dedie, mais on le signale plutot que de le deviner en silence
+            au_mois = round(float(valeur), 2)
+        else:
+            au_mois = None
+
+        return {
+            "ovh_name": nom,
+            "service_id": sid,
+            "price_value": valeur,
+            "price_currency": prix.get("currencyCode"),
+            "price_period": periode,
+            "price_month": au_mois,
+            "next_billing": (fac.get("nextBillingDate") or "")[:10] or None,
+            "erreur": None if valeur is not None
+                      else "aucun tarif rendu par /services/{}".format(sid),
+        }
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        lignes = [x for x in pool.map(one, ids) if x]
+    return {x["ovh_name"]: x for x in lignes}
 
 
 def fetch_vps(cli, workers):

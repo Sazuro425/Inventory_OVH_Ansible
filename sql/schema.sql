@@ -151,6 +151,67 @@ CREATE TABLE IF NOT EXISTS secret_store (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ---------------------------------------------------------------------------
+-- Cout du serveur chez OVH, releve a chaque collecte.
+--
+-- Table a part plutot que des colonnes sur server_snapshot : le prix vient
+-- d'une autre API (/services) et demande un droit supplementaire sur la clef
+-- OVH. Si ce droit manque, la collecte materielle continue et cette table
+-- reste vide, au lieu de semer des colonnes nulles dans l'instantane
+-- principal.
+--
+-- price_month est le prix ramene au mois a l'ecriture : price_period vaut
+-- P1M, P1Y ou P3M selon l'engagement, et personne n'a envie de parser de
+-- l'ISO8601 dans une vue SQL.
+CREATE TABLE IF NOT EXISTS server_cost (
+  run_id         INT           NOT NULL,
+  ovh_name       VARCHAR(190)  NOT NULL,
+  service_id     BIGINT        NULL,
+  price_value    DECIMAL(10,2) NULL,
+  price_currency CHAR(3)       NULL,
+  price_period   VARCHAR(16)   NULL,
+  price_month    DECIMAL(10,2) NULL,
+  next_billing   DATE          NULL,
+  erreur         VARCHAR(300)  NULL,
+  PRIMARY KEY (run_id, ovh_name),
+  INDEX idx_cost_nom (ovh_name),
+  CONSTRAINT fk_cost_run FOREIGN KEY (run_id)
+    REFERENCES collect_run (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
+-- Volet commercial : ce qu'une VM est vendue, et sous quel contrat.
+--
+-- Ce n'est PAS un instantane : pas de run_id, la donnee est saisie a la main
+-- et survit aux collectes. Elle est rattachee a la VM par son nom, parce que
+-- c'est la seule chose qu'un commercial connaisse ; cluster_name leve
+-- l'ambiguite quand deux clusters portent une VM du meme nom.
+--
+-- Rien n'est jamais supprime : on repasse actif a 0. Un contrat resilie doit
+-- rester lisible, c'est la trace de ce qui a ete facture.
+CREATE TABLE IF NOT EXISTS commercial (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  vm_name      VARCHAR(190)  NOT NULL,
+  cluster_name VARCHAR(190)  NULL,
+  contrat      VARCHAR(100)  NOT NULL,
+  client       VARCHAR(190)  NULL,
+  prix_vente   DECIMAL(10,2) NOT NULL,
+  devise       CHAR(3)       NOT NULL DEFAULT 'EUR',
+  periode      ENUM('mois','an') NOT NULL DEFAULT 'mois',
+  debut        DATE          NULL,
+  fin          DATE          NULL,
+  actif        TINYINT(1)    NOT NULL DEFAULT 1,
+  cree_le      DATETIME      NOT NULL,
+  cree_par     VARCHAR(190)  NOT NULL,
+  maj_le       DATETIME      NULL,
+  maj_par      VARCHAR(190)  NULL,
+  -- un numero de contrat ne designe qu'une vente : la contrainte attrape la
+  -- double saisie, l'erreur la plus courante quand deux commerciaux
+  -- travaillent sur le meme parc
+  UNIQUE KEY uq_contrat (contrat),
+  INDEX idx_vente_vm (vm_name, actif)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
 -- Migration : ajoute les colonnes manquantes sur une base deja en place.
 -- ADD COLUMN IF NOT EXISTS est idempotent, ce bloc peut etre rejoue.
 -- ---------------------------------------------------------------------------
@@ -227,3 +288,73 @@ CREATE OR REPLACE VIEW v_current_inventory AS
   FROM v_current_guests g
   LEFT JOIN v_current_servers s
     ON s.reverse_name = g.via_host;
+
+-- ---------------------------------------------------------------------------
+-- Rentabilite
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE VIEW v_current_costs AS
+  SELECT c.* FROM server_cost c
+  JOIN v_last_run r ON r.id = c.run_id;
+
+-- Les ventes en cours, ramenees au mois pour etre comparables au cout OVH,
+-- qui est mensuel lui aussi.
+CREATE OR REPLACE VIEW v_vente_active AS
+  SELECT
+    id, vm_name, cluster_name, contrat, client, devise,
+    prix_vente, periode,
+    CASE WHEN periode = 'an' THEN prix_vente / 12 ELSE prix_vente END
+      AS vente_mois
+  FROM commercial
+  WHERE actif = 1
+    AND (fin IS NULL OR fin >= CURDATE());
+
+-- Un serveur et son resultat : ce qu'il coute, ce que ses VM rapportent.
+-- LEFT JOIN partout : un serveur sans cout releve, ou sans aucune VM vendue,
+-- doit apparaitre quand meme — c'est precisement celui qu'on cherche.
+CREATE OR REPLACE VIEW v_rentabilite_serveur AS
+  SELECT
+    s.ovh_name,
+    s.reverse_name,
+    s.offer,
+    s.datacenter,
+    s.expiration,
+    k.price_month                           AS cout_mois,
+    k.price_currency                        AS devise,
+    COALESCE(SUM(v.vente_mois), 0)          AS vente_mois,
+    COALESCE(SUM(v.vente_mois), 0) - COALESCE(k.price_month, 0)
+                                            AS marge_mois,
+    COUNT(DISTINCT g.id)                    AS nb_invites,
+    COUNT(DISTINCT v.contrat)               AS nb_contrats
+  FROM v_current_servers s
+  LEFT JOIN v_current_costs  k ON k.ovh_name = s.ovh_name
+  LEFT JOIN v_current_guests g ON g.via_host = s.reverse_name
+  LEFT JOIN v_vente_active   v ON v.vm_name  = g.name
+  GROUP BY s.ovh_name, s.reverse_name, s.offer, s.datacenter, s.expiration,
+           k.price_month, k.price_currency;
+
+-- Contrats actifs dont la VM n'est plus dans l'inventaire : soit la VM a ete
+-- detruite sans resilier, soit elle a ete renommee. Dans les deux cas on
+-- facture quelque chose qui n'existe pas.
+CREATE OR REPLACE VIEW v_vente_orpheline AS
+  SELECT v.*
+  FROM v_vente_active v
+  LEFT JOIN v_current_guests g ON g.name = v.vm_name
+  WHERE g.id IS NULL;
+
+-- Le total du parc, en une ligne.
+CREATE OR REPLACE VIEW v_rentabilite_globale AS
+  SELECT
+    (SELECT COALESCE(SUM(price_month), 0) FROM v_current_costs)
+      AS cout_mois,
+    (SELECT COUNT(*) FROM v_current_costs WHERE price_month IS NULL)
+      AS serveurs_sans_cout,
+    (SELECT COALESCE(SUM(vente_mois), 0) FROM v_rentabilite_serveur)
+      AS vente_mois,
+    (SELECT COALESCE(SUM(vente_mois), 0) FROM v_rentabilite_serveur)
+      - (SELECT COALESCE(SUM(price_month), 0) FROM v_current_costs)
+      AS marge_mois,
+    (SELECT COUNT(*) FROM v_vente_active)        AS nb_contrats,
+    (SELECT COUNT(*) FROM v_vente_orpheline)     AS nb_orphelins,
+    (SELECT COUNT(*) FROM v_rentabilite_serveur WHERE marge_mois < 0)
+      AS serveurs_a_perte;

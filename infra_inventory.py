@@ -41,6 +41,7 @@ import yaml  # noqa: E402
 
 from ovh_inventory import OvhClient, OvhError, ENDPOINTS  # noqa: E402
 from ovh_inventory import load_credentials as load_ovh_credentials  # noqa: E402
+from ovh_inventory import fetch_costs as fetch_ovh_costs_api  # noqa: E402
 import inventory_db  # noqa: E402
 import secrets_infra  # noqa: E402
 from proxmox_inventory import (PveClient, PveError, pin_certificate,  # noqa: E402
@@ -178,13 +179,38 @@ def token_for(conf, host):
 # OVH : les machines physiques
 # --------------------------------------------------------------------------
 
-def fetch_ovh_servers(conf, workers):
+def client_ovh(conf):
     args = type("A", (), {
         "config": conf["ovh"].get("config"),
         "endpoint": conf["ovh"].get("endpoint", "ovh-eu"),
     })()
-    creds = load_ovh_credentials(args)
-    cli = OvhClient(**creds)
+    return OvhClient(**load_ovh_credentials(args))
+
+
+def fetch_ovh_costs(conf, workers):
+    """Le prix paye par serveur, indexe par nom OVH.
+
+    Separe de la collecte materielle : ce qu'un serveur coute n'a pas la meme
+    criticite que ce qu'il contient, et l'API qui le rend n'est pas la meme.
+    Une erreur ici ne doit jamais faire echouer une collecte.
+    """
+    if conf["ovh"].get("couts") is False:
+        log("OVH : releve des couts desactive par la configuration")
+        return {}
+    try:
+        couts = fetch_ovh_costs_api(client_ovh(conf), workers)
+    except OvhError as exc:
+        log("OVH : couts indisponibles ({}) — la collecte continue".format(exc))
+        return {}
+    sans = [k for k, v in couts.items() if v.get("price_month") is None]
+    log("OVH : {} cout(s) releve(s){}".format(
+        len(couts),
+        ", {} sans tarif".format(len(sans)) if sans else ""))
+    return couts
+
+
+def fetch_ovh_servers(conf, workers):
+    cli = client_ovh(conf)
     names = cli.get_safe("/dedicated/server", []) or []
     log("OVH : {} serveur(s) dedie(s)".format(len(names)))
 
@@ -336,6 +362,7 @@ def collect_cluster(conf, probe, detail):
 
 def gather(conf, workers, detail):
     servers = fetch_ovh_servers(conf, workers)
+    couts = fetch_ovh_costs(conf, workers)
     skip = set(conf["pve"].get("skip") or [])
     targets = [s for s in servers
                if s["reverse"] not in skip and s["ovh_name"] not in skip]
@@ -381,6 +408,8 @@ def gather(conf, workers, detail):
     log("Total : {} invite(s) sur {} cluster(s) ; {} hote(s) injoignable(s)".format(
         len(guests), len(representatives), len(injoignables)))
     return {"servers": servers, "probes": probes, "guests": guests,
+            "costs": [couts[s["ovh_name"]] for s in servers
+                      if s["ovh_name"] in couts],
             "generated_at": int(time.time())}
 
 

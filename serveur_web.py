@@ -19,6 +19,15 @@ Routes :
     POST /api/token       emet un jeton a usage unique (identite OIDC requise)
     GET  /api/inventaire  rend l'inventaire Ansible (jeton requis, consomme)
     GET  /api/sante       etat du service, sans authentification
+    GET  /api/rentabilite cout OVH contre ventes (identite requise)
+    GET  /api/commercial  les ventes, ?vm=nom pour une seule
+    POST /api/commercial  cree ou corrige une vente (role commercial)
+    POST /api/commercial/resilier   passe un contrat a inactif
+
+Le role commercial se declare dans infra.yml, sous web: soit une liste de
+comptes (commerciaux:), soit un groupe OIDC (groupe_commercial:) qu'Apache
+transmet dans X-Remote-Groups. Tant que ni l'un ni l'autre n'est renseigne,
+aucune ecriture n'est acceptee.
 """
 
 from __future__ import annotations
@@ -32,6 +41,7 @@ import secrets
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -113,12 +123,78 @@ class Handler(BaseHTTPRequestHandler):
         """Identite OIDC transmise par Apache, ou compte de developpement."""
         return self.headers.get("X-Remote-User") or self.dev_user
 
+    def groupes(self):
+        """Groupes OIDC, si Apache les transmet :
+
+            RequestHeader set X-Remote-Groups %{OIDC_CLAIM_groups}s
+        """
+        brut = self.headers.get("X-Remote-Groups") or ""
+        return [g.strip() for g in brut.replace(";", ",").split(",") if g.strip()]
+
+    def peut_vendre(self):
+        """Qui a le droit d'ecrire une vente.
+
+        Refus par defaut : tant que rien n'est declare dans infra.yml,
+        personne n'ecrit. Une interface de saisie qui s'ouvre d'elle-meme
+        parce que la configuration est vide, c'est l'inverse de ce qu'on veut.
+
+        En --dev-user, tout passe : l'option annonce deja qu'elle tient
+        n'importe quelle requete pour authentifiee.
+        """
+        utilisateur = self.identite()
+        if not utilisateur:
+            return False, "identite absente"
+        if self.dev_user and not self.headers.get("X-Remote-User"):
+            return True, None
+
+        web = self.conf.get("web") or {}
+        comptes = [c.lower() for c in (web.get("commerciaux") or [])]
+        groupe = (web.get("groupe_commercial") or "").lower()
+
+        if comptes and utilisateur.lower() in comptes:
+            return True, None
+        if groupe and groupe in [g.lower() for g in self.groupes()]:
+            return True, None
+        if not comptes and not groupe:
+            return False, ("aucun commercial declare : renseigne "
+                           "web.commerciaux ou web.groupe_commercial "
+                           "dans infra.yml")
+        return False, "{} n'a pas le droit d'enregistrer une vente".format(
+            utilisateur)
+
+    def corps_json(self, limite=16384):
+        """Lit le corps de la requete.
+
+        La limite evite qu'un Content-Length fantaisiste fasse grossir le
+        processus : on n'alloue jamais plus que ce qu'une vente pese.
+        """
+        try:
+            taille = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return None, "Content-Length illisible"
+        if taille <= 0:
+            return None, "corps vide"
+        if taille > limite:
+            return None, "corps trop volumineux"
+        try:
+            charge = json.loads(self.rfile.read(taille).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            return None, "JSON invalide : {}".format(exc)
+        if not isinstance(charge, dict):
+            return None, "un objet JSON est attendu"
+        return charge, None
+
     def base(self):
         return inventory_db.connect(self.conf)
 
     # -- routes ------------------------------------------------------------
     def do_POST(self):
-        if self.path.rstrip("/") != "/api/token":
+        route = self.path.split("?")[0].rstrip("/")
+        if route == "/api/commercial":
+            return self.enregistrer_vente()
+        if route == "/api/commercial/resilier":
+            return self.resilier_vente()
+        if route != "/api/token":
             return self.repondre(404, {"erreur": "route inconnue"})
         utilisateur = self.identite()
         if not utilisateur:
@@ -143,6 +219,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.sante()
         if route == "/api/inventaire":
             return self.inventaire()
+        if route == "/api/rentabilite":
+            return self.rentabilite()
+        if route == "/api/commercial":
+            return self.lister_ventes()
         if route in ("", "/index.html") and self.page:
             return self.servir_page()
         return self.repondre(404, {"erreur": "route inconnue"})
@@ -160,6 +240,111 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(corps)
+
+    # -- volet commercial --------------------------------------------------
+    def requete(self):
+        return parse_qs(urlparse(self.path).query)
+
+    def lister_ventes(self):
+        """Les ventes, toutes ou celles d'une VM. Lecture : identite suffit."""
+        if not self.identite():
+            return self.repondre(401, {"erreur": "identite absente"})
+        q = self.requete()
+        vm = (q.get("vm") or [None])[0]
+        toutes = (q.get("toutes") or ["0"])[0] in ("1", "true", "oui")
+        try:
+            conn = self.base()
+            ventes = inventory_db.lister_ventes(conn, vm=vm, actives=not toutes)
+            conn.close()
+        except inventory_db.DbError as exc:
+            return self.repondre(503, {"erreur": str(exc)})
+        peut, _ = self.peut_vendre()
+        self.repondre(200, {"ventes": ventes, "peut_ecrire": peut})
+
+    def enregistrer_vente(self):
+        """Cree ou corrige une vente. Reserve aux comptes declares."""
+        peut, motif = self.peut_vendre()
+        if not peut:
+            code = 401 if motif == "identite absente" else 403
+            return self.repondre(code, {"erreur": motif})
+
+        charge, erreur = self.corps_json()
+        if erreur:
+            return self.repondre(400, {"erreur": erreur})
+
+        # On controle la saisie avant d'ouvrir la base : une ligne refusee ne
+        # doit pas couter une connexion, et le commercial doit lire "prix
+        # negatif" plutot qu'une erreur de connexion qui ne le concerne pas.
+        try:
+            inventory_db.verifier_vente(charge)
+        except inventory_db.VenteInvalide as exc:
+            return self.repondre(422, {"erreur": str(exc)})
+
+        utilisateur = self.identite()
+        try:
+            conn = self.base()
+            try:
+                vente = inventory_db.enregistrer_vente(conn, charge, utilisateur)
+            finally:
+                conn.close()
+        except inventory_db.VenteInvalide as exc:
+            return self.repondre(422, {"erreur": str(exc)})
+        except inventory_db.DbError as exc:
+            return self.repondre(503, {"erreur": str(exc)})
+
+        self.log_message("vente %s par %s : %s -> %.2f %s/%s",
+                         "creee" if vente["cree"] else "corrigee", utilisateur,
+                         vente["vm_name"], vente["prix_vente"],
+                         vente["devise"], vente["periode"])
+        self.repondre(201 if vente["cree"] else 200,
+                      {"enregistre": True, "cree": vente["cree"],
+                       "vente": {k: v for k, v in vente.items()
+                                 if k != "cree"},
+                       "par": utilisateur})
+
+    def resilier_vente(self):
+        peut, motif = self.peut_vendre()
+        if not peut:
+            code = 401 if motif == "identite absente" else 403
+            return self.repondre(code, {"erreur": motif})
+
+        charge, erreur = self.corps_json()
+        if erreur:
+            return self.repondre(400, {"erreur": erreur})
+
+        utilisateur = self.identite()
+        try:
+            conn = self.base()
+            try:
+                touche = inventory_db.desactiver_vente(
+                    conn, charge.get("contrat"), utilisateur)
+            finally:
+                conn.close()
+        except inventory_db.VenteInvalide as exc:
+            return self.repondre(422, {"erreur": str(exc)})
+        except inventory_db.DbError as exc:
+            return self.repondre(503, {"erreur": str(exc)})
+
+        if not touche:
+            return self.repondre(404, {"erreur": "aucun contrat actif sous ce "
+                                                 "numero"})
+        self.log_message("contrat resilie par %s : %s", utilisateur,
+                        charge.get("contrat"))
+        self.repondre(200, {"resilie": True, "par": utilisateur})
+
+    def rentabilite(self):
+        """Cout OVH contre ventes : par serveur, et pour tout le parc."""
+        if not self.identite():
+            return self.repondre(401, {"erreur": "identite absente"})
+        try:
+            conn = self.base()
+            res = inventory_db.rentabilite(conn)
+            conn.close()
+        except inventory_db.DbError as exc:
+            return self.repondre(503, {"erreur": str(exc)})
+        peut, _ = self.peut_vendre()
+        res["peut_ecrire"] = peut
+        self.repondre(200, res)
 
     def sante(self):
         try:

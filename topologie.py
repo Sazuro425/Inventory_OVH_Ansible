@@ -71,6 +71,18 @@ def construire(data, acces=None, conf=None):
         par_hote.setdefault(g.get("via_host"), []).append(g)
     probes_par_hote = {p["host"]: p for p in probes}
 
+    # Cout mensuel par nom OVH. Il vient du snapshot, donc il est fige comme
+    # le reste ; les ventes, elles, changent entre deux collectes et sont
+    # chargees par le navigateur depuis /api/rentabilite.
+    couts = {c.get("ovh_name"): c.get("price_month")
+             for c in (data.get("costs") or [])
+             if c.get("ovh_name")}
+
+    def euros_mois(valeur, devise="EUR"):
+        if valeur is None:
+            return None
+        return "{:,.2f} {} / mois".format(float(valeur), devise).replace(",", " ")
+
     datacenters = {}
     for srv in serveurs:
         datacenters.setdefault((srv.get("datacenter") or "inconnu").lower(),
@@ -118,6 +130,9 @@ def construire(data, acces=None, conf=None):
                                              srv.get("reverse")))
             noeuds.append({
                 "id": id_srv, "parent": id_dc, "kind": "srv",
+                # le nom OVH est la clef de jointure avec le cout et, cote
+                # navigateur, avec /api/rentabilite
+                "ovh": srv.get("ovh_name") or "",
                 "libelle": "Serveur dédié", "titre": srv.get("reverse") or "",
                 "lignes": [l for l in (
                     offre or None,
@@ -155,6 +170,8 @@ def construire(data, acces=None, conf=None):
                                       "inconnu": "IP inconnue"}.get(
                         etat_acces(srv.get("ip"), "root", srv.get("os"),
                                    None, srv.get("reverse"))),
+                    "Coût OVH": euros_mois(
+                        couts.get(srv.get("ovh_name") or "")),
                 },
             })
 
@@ -229,6 +246,10 @@ def construire(data, acces=None, conf=None):
                 noeuds.append({
                     "id": "vm:{}:{}".format(probe["host"], g.get("vmid")),
                     "parent": id_node, "kind": "vm",
+                    # clef de jointure avec la table commercial : c'est le nom
+                    # que le commercial connait, pas le vmid
+                    "vm": g.get("name") or "",
+                    "ovh": srv.get("ovh_name") or "",
                     "libelle": "Machine virtuelle" if type_g == "qemu"
                                else "Conteneur",
                     "titre": "{} · {}".format(g.get("vmid"), g.get("name") or ""),
