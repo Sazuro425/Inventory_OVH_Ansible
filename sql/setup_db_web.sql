@@ -36,23 +36,34 @@ GRANT SELECT ON inventory.v_current_inventory TO 'inventory_web'@'localhost';
 GRANT SELECT ON inventory.server_cost     TO 'inventory_web'@'localhost';
 GRANT SELECT ON inventory.v_current_costs TO 'inventory_web'@'localhost';
 
--- Rentabilite : des vues, donc rien de plus que ce que les tables ci-dessus
--- et commercial contiennent deja.
-GRANT SELECT ON inventory.v_serveur_cluster     TO 'inventory_web'@'localhost';
-GRANT SELECT ON inventory.v_rentabilite_cluster TO 'inventory_web'@'localhost';
-GRANT SELECT ON inventory.v_rentabilite_serveur TO 'inventory_web'@'localhost';
-GRANT SELECT ON inventory.v_rentabilite_globale TO 'inventory_web'@'localhost';
-GRANT SELECT ON inventory.v_vente_active        TO 'inventory_web'@'localhost';
-GRANT SELECT ON inventory.v_vente_localisee     TO 'inventory_web'@'localhost';
-GRANT SELECT ON inventory.v_vente_orpheline     TO 'inventory_web'@'localhost';
+-- Rentabilite : le calcul est fait par rentabilite.py, qui ne lit que les
+-- tables ci-dessus et les saisies ci-dessous. Une seule vue, qui ramene les
+-- ventes au mois.
+GRANT SELECT ON inventory.v_vente_active TO 'inventory_web'@'localhost';
 
--- Volet commercial : la seule table que ce compte ecrit, et la seule donnee
--- de la base saisie par un humain. SELECT, INSERT, UPDATE, et pas DELETE :
--- une resiliation repasse actif a 0, elle n'efface pas la ligne. Ce qui a
--- ete facture doit rester lisible, et un defaut du service web ne doit pas
--- pouvoir faire disparaitre l'historique des ventes.
+-- Saisies humaines : ventes, elements declares, corrections. SELECT, INSERT,
+-- UPDATE, et pas DELETE : une resiliation ou un retrait repasse actif a 0,
+-- une correction levee repasse sa valeur a NULL. Ce qui a ete facture doit
+-- rester lisible, et un defaut du service web ne doit pas pouvoir faire
+-- disparaitre l'historique.
 GRANT SELECT, INSERT, UPDATE ON inventory.commercial
   TO 'inventory_web'@'localhost';
+GRANT SELECT, INSERT, UPDATE ON inventory.element
+  TO 'inventory_web'@'localhost';
+GRANT SELECT, INSERT, UPDATE ON inventory.surcharge
+  TO 'inventory_web'@'localhost';
+
+-- Journal des saisies : INSERT et SELECT seulement. Le service ecrit la
+-- trace de chaque saisie, il ne peut ni la corriger ni l'effacer — meme
+-- entre les mains d'un attaquant.
+GRANT SELECT, INSERT ON inventory.journal_saisie
+  TO 'inventory_web'@'localhost';
+
+-- Vues de rentabilite enregistrees : des filtres nommes, pas des donnees.
+-- Meme regle que le reste, pas de DELETE.
+GRANT SELECT, INSERT, UPDATE ON inventory.vue_rentabilite
+  TO 'inventory_web'@'localhost';
+
 
 -- Jetons a usage unique : emission et consommation. Pas de DELETE — la purge
 -- des jetons perimes releve de l'administration, pas du service expose.
@@ -88,8 +99,10 @@ SELECT grantee, table_name, privilege_type
 
 
 -- ---------------------------------------------------------------------------
--- Verification : la seule table en ecriture doit etre commercial
---                (plus client_token, qui l'etait deja)
+-- Verification : les tables en ecriture doivent etre exactement
+--   client_token, commercial, element, surcharge,
+--   vue_rentabilite                                 INSERT,UPDATE
+--   journal_saisie                                  INSERT
 -- ---------------------------------------------------------------------------
 
 SELECT table_name, GROUP_CONCAT(privilege_type ORDER BY privilege_type) AS droits

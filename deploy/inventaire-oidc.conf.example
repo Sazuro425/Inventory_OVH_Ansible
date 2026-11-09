@@ -2,66 +2,113 @@
 #
 #   sudo apt install libapache2-mod-auth-openidc
 #   sudo a2enmod auth_openidc
-#   sudo mkdir -p /etc/apache2/conf-secrets
-#   sudo cp deploy/inventaire-oidc.conf.example \
-#           /etc/apache2/conf-secrets/inventaire-oidc.conf
-#   sudo chown root:www-data /etc/apache2/conf-secrets/inventaire-oidc.conf
-#   sudo chmod 640 /etc/apache2/conf-secrets/inventaire-oidc.conf
+#   sudo install -d -m 750 -o root -g www-data /etc/apache2/conf-secrets
+#   sudo install -m 640 -o root -g www-data deploy/inventaire-oidc.conf.example \
+#        /etc/apache2/conf-secrets/inventaire-oidc.conf
 #
-# Ce fichier contient un secret client : il ne va pas dans un depot.
-# Le vhost l'inclut avec IncludeOptional, donc Apache demarre meme sans lui
-# (on reste alors sur l'authentification basic).
+# Ce fichier contient un secret client : il ne va pas dans un depot. Le vhost
+# l'inclut avec Include : sans lui, Apache refuse de demarrer.
 #
 # ---------------------------------------------------------------------------
 # Cote Authentik, avant de remplir ce fichier
 # ---------------------------------------------------------------------------
-# 1. Applications > Providers > Create > OAuth2/OpenID Provider
-#      Name                  : Inventaire
-#      Authorization flow    : explicit ou implicit consent, au choix
-#      Client type           : Confidential
-#      Redirect URIs         : https://inventaire.exemple.lan/oidc-callback
-#                              (exactement l'OIDCRedirectURI ci-dessous)
-#      Signing key           : la cle par defaut
-#      Scopes                : openid, profile, email
-#                              + "groups" si tu veux filtrer par groupe
-# 2. Applications > Applications > Create
-#      Slug                  : inventaire   (il apparait dans l'URL metadata)
-#      Provider              : celui cree a l'etape 1
-# 3. Relever Client ID et Client Secret dans le provider.
+# 1. Directory > Groups : creer inventaire-lecture, inventaire-commercial,
+#    inventaire-admin. Un groupe parent convient aussi : le mapping ci-dessous
+#    descend la hierarchie.
+#
+# 2. Customization > Property Mappings > Create > Scope Mapping
+#      Name        : inventaire profile
+#      Scope name  : profile        (et non "groups" : voir plus bas)
+#      Expression  :
+#
+#        return {
+#            "name": request.user.name,
+#            "given_name": request.user.name,
+#            "preferred_username": request.user.username,
+#            "nickname": request.user.username,
+#            "groups": [g.name for g in request.user.all_groups()
+#                       if g.name.startswith("inventaire-")],
+#        }
+#
+#    Pourquoi ainsi :
+#    - le mapping natif "OpenID 'profile'" ecrit lui aussi la claim groups,
+#      avec TOUS les groupes de l'utilisateur ; deux mappings qui ecrivent la
+#      meme claim se fusionnent dans un ordre non garanti. On remplace donc le
+#      natif plutot que d'en ajouter un.
+#    - all_groups() et non ak_groups : ak_groups ne voit que les appartenances
+#      directes, et un membre d'un groupe parent sortirait sans aucun groupe.
+#    - le filtre sur le prefixe evite d'envoyer a cette application la liste
+#      de tous les groupes de l'annuaire.
+#
+# 3. Applications > Providers > Create > OAuth2/OpenID Provider
+#      Name               : Inventaire
+#      Authorization flow : explicit ou implicit consent, au choix
+#      Client type        : Confidential
+#      Redirect URIs      : https://inventaire.exemple.lan/oidc-callback
+#                           (exactement l'OIDCRedirectURI ci-dessous, en strict)
+#      Signing Key        : la cle par defaut
+#      Encryption Key     : VIDE. Rempli, Authentik emet un JWE a 5 parties au
+#                           lieu d'un JWS a 3, et le module rejette l'id_token
+#                           sans jamais parler de chiffrement. Verification :
+#                           curl -s https://authentik.exemple.lan/application/o/inventaire/jwks/
+#                           ne doit montrer aucune cle "use": "enc".
+#      Advanced protocol settings > Scopes :
+#                           openid, email, et "inventaire profile" ;
+#                           RETIRER "OpenID 'profile'" et "OpenID 'groups'".
+#
+# 4. Applications > Applications > Create
+#      Slug     : inventaire   (il apparait dans l'URL des metadonnees)
+#      Provider : celui de l'etape 3
+#      Policy / Group binding : les trois groupes inventaire-*, pour qu'un
+#      compte hors groupe soit arrete chez Authentik, avant meme Apache.
+#
+# 5. Verifier ce que le provider emettra, sans se connecter :
+#      Provider > Preview > choisir un utilisateur : la claim "groups" doit
+#      contenir ses groupes inventaire-*, et seulement eux.
 # ---------------------------------------------------------------------------
 
-# Authentik publie ses metadonnees par application ; <slug> est celui ci-dessus
+# Authentik publie ses metadonnees par application ; "inventaire" est le slug
 OIDCProviderMetadataURL https://authentik.exemple.lan/application/o/inventaire/.well-known/openid-configuration
 
 OIDCClientID     REMPLACER_CLIENT_ID
 OIDCClientSecret REMPLACER_CLIENT_SECRET
 
 # URL interne au module : aucun fichier ne doit exister a cet emplacement,
-# Apache l'intercepte. Elle doit figurer telle quelle dans les Redirect URIs
-# du provider Authentik.
+# Apache l'intercepte. Elle sert aussi a la deconnexion :
+#   /oidc-callback?logout=https://inventaire.exemple.lan/
+# ferme la session Apache puis celle d'Authentik (end_session_endpoint).
 OIDCRedirectURI https://inventaire.exemple.lan/oidc-callback
 
 # Chiffre les cookies de session du module. A generer une fois :
 #   openssl rand -base64 32
 OIDCCryptoPassphrase REMPLACER_PAR_UNE_CHAINE_ALEATOIRE
 
+# "profile" porte la claim groups, par le mapping de l'etape 2
 OIDCScope "openid profile email"
 
-# Nom lisible plutot qu'un UUID dans les journaux Apache
+# Nom lisible plutot qu'un UUID, dans les journaux comme dans le journal des
+# saisies de l'application
 OIDCRemoteUserClaim preferred_username
 
-# Session de 8 heures, prolongee tant que l'onglet sert
+# Les claims passent en variables d'environnement, pas en en-tetes vers le
+# service : le vhost pose lui-meme les deux en-tetes utiles (X-Remote-User,
+# X-Remote-Groups), et rien d'autre de l'id_token ne quitte Apache.
+OIDCPassClaimsAs environment
+OIDCClaimDelimiter ,
+
+# Session de 8 heures au plus, close apres une heure sans requete
 OIDCSessionInactivityTimeout 3600
 OIDCSessionMaxDuration 28800
 
-# Cookie de session : HTTPS obligatoire, pas d'acces JavaScript
+# Cookie de session : HTTPS, pas d'acces JavaScript, pas d'envoi sur une
+# requete venue d'un autre site
 OIDCCookiePath /
+OIDCCookieHTTPOnly On
 OIDCCookieSameSite On
 
-# Pour filtrer par groupe avec "Require claim groups:infra-admins", le claim
-# doit etre present dans l'id_token. Dans Authentik, ajouter le scope "groups"
-# au provider, puis decommenter :
-# OIDCScope "openid profile email groups"
+# PKCE en plus du secret client : un code d'autorisation intercepte ne
+# s'echange pas sans le verificateur.
+OIDCPKCEMethod S256
 
 # Deverminage : passer a "debug" temporairement, puis revenir.
 # LogLevel auth_openidc:debug

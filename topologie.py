@@ -19,6 +19,7 @@ qui doit la refaire a chaque filtre ou repli.
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import sys
@@ -66,9 +67,12 @@ def construire(data, acces=None, conf=None):
     probes = data.get("probes") or []
     invites = data.get("guests") or []
 
+    # chaque invite sous le noeud qui le fait tourner, pas sous le
+    # representant interroge pour tout son cluster
+    hote = orch.hote_des_invites(probes, invites)
     par_hote = {}
     for g in invites:
-        par_hote.setdefault(g.get("via_host"), []).append(g)
+        par_hote.setdefault(hote[id(g)], []).append(g)
     probes_par_hote = {p["host"]: p for p in probes}
 
     # Cout mensuel par nom OVH. Il vient du snapshot, donc il est fige comme
@@ -466,10 +470,16 @@ def rendre(data, titre, acces=None, conf=None):
     }
     gabarit = GABARIT.read_text(encoding="utf-8")
     json_charge = json.dumps(charge, ensure_ascii=False, separators=(",", ":"))
-    # </script> dans une donnee fermerait la balise : seul cas a neutraliser
-    json_charge = json_charge.replace("</", "<\\/")
-    return (gabarit.replace("__TITRE__", titre)
-                   .replace("__DATA__", json_charge))
+    # Un nom de VM contenant </script> fermerait la balise, et <!-- y
+    # ouvrirait un etat ou le parseur HTML ne voit plus la fin du script.
+    # < est le meme caractere pour JSON comme pour JavaScript : on
+    # neutralise tous les < plutot que de chercher les sequences dangereuses.
+    json_charge = json_charge.replace("<", "\\u003c")
+    # le titre vient de la ligne de commande, mais il atterrit dans du HTML ;
+    # les donnees passent en premier, pour qu'un titre contenant __DATA__
+    # ne soit pas remplace a son tour
+    return (gabarit.replace("__DATA__", json_charge)
+                   .replace("__TITRE__", html.escape(titre)))
 
 
 def ecrire_atomique(cible, contenu):

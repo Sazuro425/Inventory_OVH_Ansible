@@ -108,7 +108,7 @@ def generer(nb_dedies, vm_min, vm_max, seed, taux_cluster, taux_panne,
 
             probes.append({
                 "host": reverse, "node": noeud,
-                "cluster": nom_cluster or ("standalone:" + noeud),
+                "cluster": nom_cluster or ("standalone:" + reverse),
                 "members": [], "error": None, "server": {},
                 "hw": {
                     "cpu_model": "AMD {} Processor".format(cpu),

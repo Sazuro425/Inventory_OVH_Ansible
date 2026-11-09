@@ -282,28 +282,137 @@ C'est aussi le test du compte `inventory_web` : si la reponse est
 
 ## 9. Apache et OIDC
 
+Un seul mode d'authentification, OIDC par Authentik, pour la page comme pour
+l'API. Le detail cote Authentik (groupes, scope mapping, provider) est en tete
+de `deploy/inventaire-oidc.conf.example` : le suivre avant de remplir le
+fichier.
+
 ```bash
+sudo apt install libapache2-mod-auth-openidc
+sudo a2enmod ssl headers proxy proxy_http auth_openidc
 sudo cp deploy/apache-inventaire.conf /etc/apache2/sites-available/inventaire.conf
-sudo cp deploy/inventaire-oidc.conf.example /etc/apache2/conf-available/inventaire-oidc.conf
-# ajuster ServerName, les URL Authentik, le secret client
-sudo a2enmod proxy proxy_http auth_openidc
+sudo install -d -m 750 -o root -g www-data /etc/apache2/conf-secrets
+sudo install -m 640 -o root -g www-data deploy/inventaire-oidc.conf.example \
+     /etc/apache2/conf-secrets/inventaire-oidc.conf
+# remplir client, secret, passphrase ; ajuster ServerName et le certificat
 sudo a2ensite inventaire && sudo apache2ctl configtest
 sudo systemctl reload apache2
 ```
 
-Le parcours OIDC complet n'a jamais ete suivi avec un vrai Authentik. Deux
-points a verifier de pres : qu'Apache pose bien `X-Remote-User`, et qu'il
-l'**ecrase** au lieu de le transmettre. Un en-tete venant du client et laisse
-passer vaut usurpation d'identite.
+Le fichier OIDC va dans `conf-secrets`, la ou le vhost l'inclut, et non dans
+`conf-available`. Le vhost l'inclut avec `Include` : s'il manque, Apache
+refuse de demarrer, au lieu de servir une page dont l'authentification ne
+marche pas.
+
+Trois groupes Authentik ouvrent trois roles, declares dans `infra.yml` sous
+`web:` avec les memes noms que dans le vhost :
+
+| Groupe | Role | Ce qu'il permet |
+|---|---|---|
+| `inventaire-lecture` | lecture | la carte, la rentabilite, les exports |
+| `inventaire-commercial` | commercial | ventes, elements, corrections (et la lecture) |
+| `inventaire-admin` | admin | jeton pour le client Ansible (et la lecture) |
+
+Apache n'admet que les membres de l'un des trois ; le service distingue
+ensuite les roles. Les deux controles se recouvrent volontairement : une
+erreur dans l'un ne suffit pas a ouvrir l'ecriture.
+
+**Verifier la chaine Authentik > Apache > service.** Une fois connecte dans
+le navigateur, ouvrir `https://inventaire.exemple.lan/api/moi` : il rend
+l'identite, les groupes et les roles tels que le service les recoit. La page
+les affiche aussi en haut a droite.
+
+- `groupes` vide alors que l'utilisateur est membre : la claim n'arrive pas.
+  Regarder l'onglet Preview du provider, et que le mapping natif
+  `OpenID 'profile'` a bien ete retire.
+- `utilisateur` vaut un UUID : `OIDCRemoteUserClaim` n'est pas pris en compte.
+- Erreur « three parts » ou id_token rejete : une Encryption Key est posee
+  sur le provider. La vider.
+
+Et que personne d'autre qu'Apache ne joint le service :
 
 ```bash
 # doit echouer : le service n'ecoute que sur la boucle locale
 curl -s -H 'X-Remote-User: nimporte' http://<ip-publique>:8080/api/sante
+# doit renvoyer 302 vers Authentik, ou 401 pour l'API
+curl -s -o /dev/null -w '%{http_code}\n' https://inventaire.exemple.lan/
+curl -s -o /dev/null -w '%{http_code}\n' https://inventaire.exemple.lan/api/moi
+# un en-tete forge par le client est efface par Apache : toujours 401
+curl -s -H 'X-Remote-User: admin' -H 'X-Remote-Groups: inventaire-admin' \
+     https://inventaire.exemple.lan/api/moi
 ```
+
+Le parcours complet n'a pas encore ete suivi avec un vrai Authentik.
 
 ---
 
-## 10. Retour arriere
+## 10. Rentabilite, saisies et export
+
+La vue **Rentabilite** de la page montre l'arbre cluster > serveur > VM >
+elements declares, chaque carte cumulant ses enfants (PA, CA, ROI), avec la
+capacite allouee contre la capacite physique. Le calcul est dans
+`rentabilite.py`, et nulle part ailleurs : la page, l'export CSV et
+`tests_rentabilite.py` lisent le meme resultat.
+
+**Ce qu'il faut pour qu'elle affiche des chiffres :**
+
+1. Le droit `GET /services*` sur la clef OVH. Sans lui, la collecte releve le
+   materiel mais aucun cout : chaque serveur est signale « sans tarif ». Un
+   cout peut aussi etre saisi a la main (bouton *Corriger*), avec un motif.
+2. Le schema a jour, puis les droits du compte web, **dans cet ordre** :
+   un `GRANT` sur une table qui n'existe pas encore echoue.
+
+   ```bash
+   mariadb -u root -p inventory < sql/schema.sql
+   mariadb -u root -p < sql/setup_db_web.sql
+   ```
+
+   La derniere requete de `setup_db_web.sql` doit lister exactement :
+   `client_token`, `commercial`, `element`, `surcharge`, `vue_rentabilite`
+   en INSERT,UPDATE, et `journal_saisie` en INSERT seul. Le compte web ne peut ni corriger ni
+   effacer le journal.
+3. Le role commercial, dans `infra.yml` : `web.groupe_commercial` (le groupe
+   Authentik) ou `web.commerciaux` (une liste de comptes). Sans l'un des deux,
+   aucune saisie n'est acceptee. Voir l'etape 9 pour les trois roles.
+4. Le bloc `LocationMatch` de `deploy/apache-inventaire.conf` : c'est le seul
+   endroit ou `X-Remote-User` et `X-Remote-Groups` sont poses, apres l'OIDC.
+
+**Verifier :**
+
+```bash
+python3 tests_rentabilite.py                   # le calcul, sans base
+curl -s -o /dev/null -w '%{http_code}\n' https://inventaire.exemple.lan/api/rentabilite
+# 302 vers Authentik sans session : l'API n'est pas ouverte
+curl -s -H 'X-Remote-Groups: inventaire-commercial' -H 'X-Remote-User: evan' \
+     http://127.0.0.1:8080/api/rentabilite | head -c 200
+# depuis la VM seulement : rend l'arbre
+```
+
+**Les vues.** La rentabilite s'ouvre sur la vue d'ensemble, en graphiques.
+Chaque graphique bascule en tableau et s'exporte en CSV, filtres compris.
+Les filtres (clusters, datacenters, clients, genres d'element, texte, a
+perte, avec alerte) valent pour l'arbre, le tableau et les graphiques ; ils
+choisissent des cartes, ils ne recalculent pas leurs montants.
+
+« Enregistrer la vue » garde sous un nom — *Commercial*, *Compta
+mensuelle* — les filtres, la presentation, le niveau et le tri du tableau.
+Une vue est partagee avec l'equipe par defaut, ou privee. Tout lecteur en
+cree ; seul son auteur, ou un admin, la modifie ou la retire. Chaque
+navigateur rouvre la derniere vue choisie.
+
+**Ce que valent les chiffres.** Tout est ramene au mois. Le ROI d'un serveur
+est une photo : dans un cluster, une VM migre d'un noeud a l'autre, et celui
+du cluster est le chiffre stable. Les contrats dont la VM a disparu et les
+elements dont le parent a ete retire sont comptes dans le total et listes
+« hors parc », jamais perdus en silence.
+
+**L'export CSV** est en UTF-8 avec BOM, point-virgule et virgule decimale :
+il s'ouvre tel quel dans Excel et Calc en francais, les montants restent des
+nombres. Une saisie commencant par `=`, `+`, `-` ou `@` y est prefixee d'une
+apostrophe, pour qu'un nom de site ne s'execute pas comme une formule chez la
+personne qui ouvre le fichier.
+
+## 11. Retour arriere
 
 Par ordre de gravite croissante.
 

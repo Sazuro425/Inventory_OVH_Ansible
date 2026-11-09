@@ -212,6 +212,103 @@ CREATE TABLE IF NOT EXISTS commercial (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ---------------------------------------------------------------------------
+-- Elements declares a la main : ce que la collecte ne voit pas.
+--
+-- Un site dans une VM mutualisee, un vhost, un domaine, une boite mail, une
+-- licence, un stockage partage au niveau du cluster. Chacun porte un prix de
+-- vente et un prix d'achat, et se rattache a une carte parente : un cluster,
+-- un serveur, une VM, ou un autre element. La relation est toujours la meme,
+-- a n'importe quelle profondeur, et la carte parente cumule ses enfants.
+--
+-- parent_ref vaut, selon parent_type : le nom du cluster, le nom OVH du
+-- serveur, le nom de la VM, ou l'id d'un autre element.
+--
+-- Comme pour commercial, rien n'est supprime : actif passe a 0.
+CREATE TABLE IF NOT EXISTS element (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  parent_type  ENUM('cluster','serveur','vm','element') NOT NULL,
+  parent_ref   VARCHAR(190)  NOT NULL,
+  nom          VARCHAR(190)  NOT NULL,
+  genre        VARCHAR(40)   NULL,
+  contrat      VARCHAR(100)  NULL,
+  client       VARCHAR(190)  NULL,
+  prix_vente   DECIMAL(10,2) NOT NULL DEFAULT 0,
+  prix_achat   DECIMAL(10,2) NOT NULL DEFAULT 0,
+  devise       CHAR(3)       NOT NULL DEFAULT 'EUR',
+  periode      ENUM('mois','an') NOT NULL DEFAULT 'mois',
+  note         VARCHAR(500)  NULL,
+  actif        TINYINT(1)    NOT NULL DEFAULT 1,
+  cree_le      DATETIME      NOT NULL,
+  cree_par     VARCHAR(190)  NOT NULL,
+  maj_le       DATETIME      NULL,
+  maj_par      VARCHAR(190)  NULL,
+  INDEX idx_element_parent (parent_type, parent_ref, actif)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
+-- Corrections manuelles des valeurs remontees par la collecte.
+--
+-- Une ligne remplace la valeur PROPRE d'une carte : le cout OVH d'un serveur
+-- (tarif negocie, droit /services absent), le prix d'achat d'une VM (licence),
+-- ou le cluster d'un serveur (regroupement commercial de noeuds seuls).
+-- Les enfants continuent de s'ajouter par-dessus : corriger le cout d'un
+-- serveur ne fait pas disparaitre ce que ses VM rapportent.
+--
+-- valeur a NULL leve la correction. On ne supprime pas la ligne : le compte
+-- web n'a pas DELETE, et qui a leve quoi reste lisible dans le journal.
+CREATE TABLE IF NOT EXISTS surcharge (
+  cible_type   ENUM('cluster','serveur','vm') NOT NULL,
+  cible_ref    VARCHAR(190)  NOT NULL,
+  champ        ENUM('prix_achat','prix_vente','cluster') NOT NULL,
+  valeur       VARCHAR(190)  NULL,
+  motif        VARCHAR(300)  NOT NULL,
+  maj_le       DATETIME      NOT NULL,
+  maj_par      VARCHAR(190)  NOT NULL,
+  PRIMARY KEY (cible_type, cible_ref, champ)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
+-- Journal de toutes les saisies : ventes, elements, corrections.
+--
+-- Le compte web y a INSERT et SELECT, jamais UPDATE ni DELETE : un defaut du
+-- service peut ecrire une saisie fausse, il ne peut pas effacer qu'elle a eu
+-- lieu. avant et apres sont du JSON, pour qu'un litige se tranche sans
+-- reconstituer l'etat de la base a une date.
+-- ---------------------------------------------------------------------------
+-- Vues de rentabilite enregistrees : un nom ("Commercial", "Compta mensuelle")
+-- et ce qu'il faut pour la rouvrir — filtres, presentation, niveau du
+-- tableau. definition est du JSON, controle champ par champ par
+-- inventory_db.verifier_vue() avant d'etre ecrit : la page le relit et
+-- l'applique, elle ne l'execute pas.
+--
+-- Partagee par defaut : une vue sert a une equipe. Seul son auteur, ou un
+-- admin, la modifie ou la retire. Comme ailleurs, rien n'est supprime.
+CREATE TABLE IF NOT EXISTS vue_rentabilite (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  nom          VARCHAR(80)   NOT NULL,
+  definition   TEXT          NOT NULL,
+  partagee     TINYINT(1)    NOT NULL DEFAULT 1,
+  actif        TINYINT(1)    NOT NULL DEFAULT 1,
+  cree_le      DATETIME      NOT NULL,
+  cree_par     VARCHAR(190)  NOT NULL,
+  maj_le       DATETIME      NULL,
+  maj_par      VARCHAR(190)  NULL,
+  INDEX idx_vue_actif (actif, partagee)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS journal_saisie (
+  id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+  le           DATETIME      NOT NULL,
+  par          VARCHAR(190)  NOT NULL,
+  action       VARCHAR(40)   NOT NULL,
+  cible        VARCHAR(300)  NOT NULL,
+  avant        TEXT          NULL,
+  apres        TEXT          NULL,
+  INDEX idx_journal_le (le),
+  INDEX idx_journal_cible (cible(190))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
 -- Migration : ajoute les colonnes manquantes sur une base deja en place.
 -- ADD COLUMN IF NOT EXISTS est idempotent, ce bloc peut etre rejoue.
 -- ---------------------------------------------------------------------------
@@ -309,155 +406,21 @@ CREATE OR REPLACE VIEW v_vente_active AS
   WHERE actif = 1
     AND (fin IS NULL OR fin >= CURDATE());
 
--- Contrats actifs dont la VM n'est plus dans l'inventaire : soit la VM a ete
--- detruite sans resilier, soit elle a ete renommee. Dans les deux cas on
--- facture quelque chose qui n'existe pas.
-CREATE OR REPLACE VIEW v_vente_orpheline AS
-  SELECT v.*
-  FROM v_vente_active v
-  LEFT JOIN v_current_guests g ON g.name = v.vm_name
-  WHERE g.id IS NULL;
-
--- Chaque contrat rattache a UN cluster, celui de sa VM. Passer par la vente
--- et non par l'invite est volontaire : deux invites peuvent porter le meme
--- nom dans deux clusters, et sommer depuis les invites compterait alors le
--- contrat deux fois. MIN() tranche, et la somme des ventes par cluster reste
--- egale au total des contrats non orphelins — ce qui se verifie.
-CREATE OR REPLACE VIEW v_vente_localisee AS
-  SELECT v.*,
-         (SELECT MIN(g.cluster_name) FROM v_current_guests g
-           WHERE g.name = v.vm_name) AS cluster_effectif
-  FROM v_vente_active v;
-
--- Quel dedie porte quel cluster. C'est la vue que regarde un technicien :
--- une ligne par serveur, avec son noeud PVE, son cluster et son cout propre.
+-- Le calcul lui-meme — cumul des enfants, corrections, rattachement des
+-- ventes, capacite — vit dans rentabilite.py et non dans des vues.
 --
--- Un hote jamais sonde ou injoignable n'a pas de cluster connu. Lui en
--- fabriquer un, 'inconnu:<reverse>', le garde isole : son cout continue de
--- compter sans etre verse dans le resultat d'un cluster auquel rien ne dit
--- qu'il appartient.
-CREATE OR REPLACE VIEW v_serveur_cluster AS
-  SELECT
-    s.ovh_name,
-    s.reverse_name,
-    s.offer,
-    s.datacenter,
-    s.expiration,
-    n.pve_node,
-    COALESCE(n.reachable, 0)                AS reachable,
-    COALESCE(n.cluster_name,
-             CONCAT('inconnu:', s.reverse_name))  AS cluster_name,
-    (n.cluster_name IS NULL
-       OR n.cluster_name LIKE 'standalone:%')     AS seul,
-    k.price_month                           AS cout_mois,
-    k.price_currency                        AS devise
-  FROM v_current_servers s
-  LEFT JOIN v_current_nodes n ON n.host     = s.reverse_name
-  LEFT JOIN v_current_costs k ON k.ovh_name = s.ovh_name;
-
--- Le resultat se calcule par cluster, pas par serveur.
+-- Une vue SQL sait sommer un niveau ; elle sait mal cumuler une arborescence
+-- de profondeur libre (un domaine dans un vhost dans une VM dans un cluster)
+-- et appliquer des corrections a chaque etage. Garder des vues a cote du
+-- calcul Python, c'etait deux resultats qui finiraient par diverger, et le
+-- tableau de bord contredirait l'export. Il n'y a donc plus qu'un calcul,
+-- eprouve sans base par tests_rentabilite.py.
 --
--- Un cluster de quatre noeuds est une unite economique unique : une VM y
--- migre librement, elle n'appartient a aucun noeud. La collecte n'interroge
--- d'ailleurs qu'un representant par cluster, donc tous les invites portent
--- le via_host de ce seul hote. Rapporter les ventes au serveur, c'est faire
--- porter a un noeud la recette de ses trois freres, qui affichent alors leur
--- cout face a zero et passent pour etre a perte. Sur un parc de 30 dedies en
--- clusters de 2 a 4, cela designe une vingtaine de serveurs a perte sur un
--- parc parfaitement sain.
---
--- Un noeud seul est un cluster d'un seul membre : les deux cas se traitent
--- donc de la meme facon, et rien n'echappe au calcul.
-CREATE OR REPLACE VIEW v_rentabilite_cluster AS
-  SELECT
-    x.cluster_name,
-    x.seul,
-    x.nb_serveurs,
-    x.serveurs,
-    x.datacenters,
-    x.cout_mois,
-    x.serveurs_sans_cout,
-    x.devise,
-    COALESCE(i.nb_invites, 0)                              AS nb_invites,
-    COALESCE(w.nb_contrats, 0)                             AS nb_contrats,
-    COALESCE(w.vente_mois, 0)                              AS vente_mois,
-    COALESCE(w.vente_mois, 0) - COALESCE(x.cout_mois, 0)   AS marge_mois
-  FROM (
-    SELECT cluster_name,
-           MAX(seul)                  AS seul,
-           COUNT(*)                   AS nb_serveurs,
-           GROUP_CONCAT(reverse_name ORDER BY reverse_name SEPARATOR ' ')
-                                      AS serveurs,
-           GROUP_CONCAT(DISTINCT datacenter ORDER BY datacenter SEPARATOR ' ')
-                                      AS datacenters,
-           SUM(cout_mois)             AS cout_mois,
-           SUM(cout_mois IS NULL)     AS serveurs_sans_cout,
-           MIN(devise)                AS devise
-      FROM v_serveur_cluster
-     GROUP BY cluster_name
-  ) x
-  LEFT JOIN (
-    SELECT cluster_name, COUNT(*) AS nb_invites
-      FROM v_current_guests GROUP BY cluster_name
-  ) i ON i.cluster_name = x.cluster_name
-  LEFT JOIN (
-    SELECT cluster_effectif,
-           COUNT(*)         AS nb_contrats,
-           SUM(vente_mois)  AS vente_mois
-      FROM v_vente_localisee
-     WHERE cluster_effectif IS NOT NULL
-     GROUP BY cluster_effectif
-  ) w ON w.cluster_effectif = x.cluster_name;
-
--- Une ligne par serveur : son cout propre, et le resultat du cluster dont il
--- fait partie. Pas de marge par serveur : elle n'a pas de sens, et en
--- afficher une serait reinstaller l'erreur qu'on vient d'ecarter.
-CREATE OR REPLACE VIEW v_rentabilite_serveur AS
-  SELECT
-    c.ovh_name,
-    c.reverse_name,
-    c.offer,
-    c.datacenter,
-    c.expiration,
-    c.pve_node,
-    c.reachable,
-    c.cluster_name,
-    c.seul,
-    c.cout_mois,
-    c.devise,
-    r.nb_serveurs   AS cluster_nb_serveurs,
-    r.serveurs      AS cluster_serveurs,
-    r.cout_mois     AS cluster_cout_mois,
-    r.vente_mois    AS cluster_vente_mois,
-    r.marge_mois    AS cluster_marge_mois,
-    r.nb_invites    AS cluster_nb_invites,
-    r.nb_contrats   AS cluster_nb_contrats
-  FROM v_serveur_cluster c
-  LEFT JOIN v_rentabilite_cluster r ON r.cluster_name = c.cluster_name;
-
--- Le total du parc, en une ligne.
---
--- vente_mois compte TOUS les contrats actifs, orphelins compris : un contrat
--- dont la VM a disparu est facture quand meme, et l'omettre ferait paraitre
--- le parc moins rentable qu'il ne l'est. vente_hors_parc isole ce montant
--- pour que l'ecart avec la somme des clusters soit lisible au lieu d'etre
--- une difference inexpliquee.
-CREATE OR REPLACE VIEW v_rentabilite_globale AS
-  SELECT
-    (SELECT COALESCE(SUM(cout_mois), 0) FROM v_serveur_cluster)
-      AS cout_mois,
-    (SELECT COUNT(*) FROM v_serveur_cluster WHERE cout_mois IS NULL)
-      AS serveurs_sans_cout,
-    (SELECT COALESCE(SUM(vente_mois), 0) FROM v_vente_active)
-      AS vente_mois,
-    (SELECT COALESCE(SUM(vente_mois), 0) FROM v_vente_active)
-      - (SELECT COALESCE(SUM(cout_mois), 0) FROM v_serveur_cluster)
-      AS marge_mois,
-    (SELECT COALESCE(SUM(vente_mois), 0) FROM v_vente_orpheline)
-      AS vente_hors_parc,
-    (SELECT COUNT(*) FROM v_serveur_cluster)     AS nb_serveurs,
-    (SELECT COUNT(*) FROM v_rentabilite_cluster) AS nb_clusters,
-    (SELECT COUNT(*) FROM v_vente_active)        AS nb_contrats,
-    (SELECT COUNT(*) FROM v_vente_orpheline)     AS nb_orphelins,
-    (SELECT COUNT(*) FROM v_rentabilite_cluster WHERE marge_mois < 0)
-      AS clusters_a_perte;
+-- Les vues de la version precedente sont retirees ici pour qu'une base qui
+-- les aurait recues ne garde pas des chiffres que plus rien ne maintient.
+DROP VIEW IF EXISTS v_rentabilite_globale;
+DROP VIEW IF EXISTS v_rentabilite_serveur;
+DROP VIEW IF EXISTS v_rentabilite_cluster;
+DROP VIEW IF EXISTS v_serveur_cluster;
+DROP VIEW IF EXISTS v_vente_localisee;
+DROP VIEW IF EXISTS v_vente_orpheline;

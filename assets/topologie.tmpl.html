@@ -205,9 +205,296 @@
     border-radius:7px; padding:5px 10px; pointer-events:none; opacity:.85;
   }
 
+  .vente .actions { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+  .vente .lecture.alerte { color:var(--ambre); }
+  button.danger { color:var(--rouge); }
+  button.danger:hover { border-color:var(--rouge); }
+  button[hidden] { display:none; }
+
+  /* ---------- vue rentabilite ---------- */
+  /* une vue a part entiere plutot qu'un volet : l'arbre du parc avec ses
+     montants se lit comme un tableau, pas comme un schema */
+  body.mode-rent .scene, body.mode-rent .filtres { display:none; }
+  /* les outils du schema n'agissent pas sur l'arbre : les montrer ici
+     ferait croire que Rechercher filtre le tableau */
+  body.mode-rent #recherche, body.mode-rent #btn-filtres,
+  body.mode-rent #btn-plier, body.mode-rent #btn-ajuster,
+  body.mode-rent #btn-reinit, body.mode-rent #stats { display:none; }
+  .rent { display:none; flex:1 1 auto; overflow:auto; padding:16px 20px 40px;
+          background:var(--fond); }
+  body.mode-rent .rent { display:block; }
+
+  .kpis { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr));
+          gap:10px; margin-bottom:14px; }
+  .kpi { background:var(--carte); border:1px solid var(--trait);
+         border-radius:var(--r); padding:10px 14px; min-width:0; }
+  .kpi span { display:block; font-size:10.5px; color:var(--doux);
+              text-transform:uppercase; letter-spacing:.05em; }
+  .kpi b { display:block; font-size:19px; font-weight:600; margin:2px 0;
+           font-variant-numeric:tabular-nums; white-space:nowrap;
+           overflow:hidden; text-overflow:ellipsis; }
+  .kpi small { color:var(--doux); font-size:11.5px; }
+
+  .rent-outils { display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+                 margin-bottom:10px; }
+  .rent-outils .puce input { margin:0; accent-color:var(--accent); }
+  .rent-outils input[type=search] { min-width:220px; }
+  a.bouton {
+    font-size:12.5px; color:var(--texte); background:var(--carte);
+    border:1px solid var(--trait); border-radius:7px; padding:5px 10px;
+    text-decoration:none; white-space:nowrap;
+  }
+  a.bouton.primaire, a.bouton.primaire:hover {
+    background:var(--accent); border-color:var(--accent); color:#fff;
+  }
+  a.bouton:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+
+  .rent-avert p {
+    margin:0 0 6px; padding:7px 11px; font-size:12px; border-radius:7px;
+    border:1px solid var(--ambre); color:var(--texte);
+    background:color-mix(in srgb, var(--ambre) 9%, transparent);
+  }
+
+  .table-defile { overflow-x:auto; border:1px solid var(--trait);
+                  border-radius:var(--r); background:var(--carte); }
+  table.arbre { width:100%; border-collapse:collapse; font-size:12.5px;
+                min-width:820px; }
+  .arbre th {
+    position:sticky; top:0; z-index:1; background:var(--carte2);
+    text-align:left; font-size:10.5px; font-weight:600; color:var(--doux);
+    text-transform:uppercase; letter-spacing:.05em; padding:7px 10px;
+    border-bottom:1px solid var(--trait);
+  }
+  .arbre td { padding:5px 10px; border-bottom:1px solid var(--trait);
+              vertical-align:middle; }
+  .arbre tr:last-child td { border-bottom:0; }
+  .arbre .num { text-align:right; font-variant-numeric:tabular-nums;
+                white-space:nowrap; }
+  .arbre .doux { color:var(--doux); }
+  .arbre tr.r-cluster td { background:var(--carte2); }
+  .arbre tr.r-cluster .titre, .arbre tr.r-serveur .titre { font-weight:600; }
+  .arbre tr:hover td { background:var(--accent-doux); }
+  .arbre tr.cible td { background:var(--accent-doux); }
+  .arbre tr.cible td:first-child { box-shadow:inset 3px 0 0 var(--accent); }
+  .arbre td.nom { white-space:nowrap; max-width:520px; overflow:hidden;
+                  text-overflow:ellipsis; }
+  .arbre .pli { border:0; background:none; padding:0; width:18px;
+                color:var(--doux); font-size:11px; }
+  .arbre .pli.vide { display:inline-block; }
+  .arbre .genre {
+    font-size:9.5px; text-transform:uppercase; letter-spacing:.04em;
+    color:var(--doux); border:1px solid var(--trait); border-radius:4px;
+    padding:0 5px; margin-right:7px; vertical-align:1px;
+  }
+  .arbre tr.r-element .genre { border-color:var(--accent); color:var(--accent); }
+  .arbre td.nom small { color:var(--doux); margin-left:8px; font-size:11px; }
+  .arbre .alerte { color:var(--ambre); margin-left:6px; cursor:help; }
+  .arbre td.corrige::after { content:" ✎"; color:var(--ambre); }
+  .arbre td.act { white-space:nowrap; text-align:right; }
+  .arbre td.act button { padding:1px 7px; font-size:11px; margin-left:3px;
+                         opacity:.6; }
+  .arbre tr:hover td.act button, .arbre td.act button:focus-visible { opacity:1; }
+
+  /* arbre ou tableau : les outils propres a l'un disparaissent dans l'autre */
+  body:not(.mode-plat) .seul-plat, body.mode-plat .seul-arbre,
+  body.mode-graph .seul-arbre,
+  body:not(.mode-graph) .seul-graph { display:none; }
+  .segment { display:inline-flex; }
+  .segment button { border-radius:0; margin-left:-1px; }
+  .segment button:first-child { border-radius:7px 0 0 7px; margin-left:0; }
+  .segment button:last-child { border-radius:0 7px 7px 0; }
+  .segment button.actif { position:relative; z-index:1; }
+  button.primaire, button.primaire:hover {
+    background:var(--accent); border-color:var(--accent); color:#fff;
+  }
+  .arbre.plat th { padding:0; }
+  .arbre.plat th button.tri {
+    display:block; width:100%; text-align:inherit; border:0; border-radius:0;
+    background:none; padding:7px 10px; font:inherit; color:inherit;
+    text-transform:inherit; letter-spacing:inherit; white-space:nowrap;
+  }
+  .arbre.plat th button.tri:hover { color:var(--texte); }
+  .arbre.plat tbody tr { cursor:pointer; }
+  .arbre.plat td { white-space:nowrap; }
+  .arbre.plat td.nom-plat { font-weight:600; max-width:280px; overflow:hidden;
+                            text-overflow:ellipsis; }
+  .arbre.plat td.ok { color:var(--vert); }
+  .arbre.plat td.tendue { color:var(--ambre); }
+  .arbre.plat td.trop { color:var(--rouge); font-weight:600; }
+  .arbre.plat tfoot th, .arbre.plat tfoot td {
+    position:sticky; bottom:0; background:var(--carte2); font-weight:600;
+    border-top:1px solid var(--trait2); padding:7px 10px; text-align:left;
+    text-transform:none; letter-spacing:0; font-size:12.5px; color:var(--texte);
+  }
+  .arbre.plat tfoot td.num { text-align:right; }
+
+  .capa { display:inline-flex; align-items:center; gap:7px; white-space:nowrap; }
+  .jauge { width:64px; height:6px; border-radius:3px; background:var(--trait);
+           overflow:hidden; display:inline-block; }
+  .jauge i { display:block; height:100%; background:var(--vert); }
+  .jauge.tendue i { background:var(--ambre); }
+  .jauge.trop i { background:var(--rouge); }
+  .capa small { color:var(--doux); font-size:11px; }
+
+  .rent-orph { max-width:900px; }
+  .rent-orph li .lecture { margin:0; flex:0 1 auto; }
+  .rent-pied { color:var(--doux); font-size:11.5px; margin:14px 0 0;
+               max-width:900px; line-height:1.55; }
+
+  .tiroir { position:fixed; top:64px; right:14px; width:340px;
+            max-height:calc(100vh - 80px); z-index:6; }
+  .saisie input, .saisie select, .saisie textarea {
+    width:100%; font:inherit; font-size:12.5px; color:var(--texte);
+    background:var(--fond); border:1px solid var(--trait); border-radius:7px;
+    padding:5px 8px;
+  }
+  .saisie input:focus, .saisie select:focus, .saisie textarea:focus {
+    outline:2px solid var(--accent); outline-offset:0; border-color:transparent;
+  }
+  .saisie input[readonly] { color:var(--doux); }
+  .vente form.saisie .paire { grid-template-columns:1fr 1fr; }
+  .saisie textarea { resize:vertical; }
+
+  .journal li { display:block; }
+  .journal li b { display:block; font-size:12px; font-weight:600; }
+  .journal li small { color:var(--doux); }
+  .journal code { display:block; font-size:10.5px; color:var(--doux);
+                  word-break:break-all; margin-top:2px; }
+
+  .flash {
+    position:fixed; bottom:18px; left:50%; transform:translateX(-50%);
+    background:var(--carte); border:1px solid var(--vert); color:var(--vert);
+    padding:8px 14px; border-radius:8px; box-shadow:var(--ombre); opacity:0;
+    pointer-events:none; transition:opacity .2s; z-index:10; font-size:12.5px;
+  }
+  .flash.visible { opacity:1; }
+
+  /* ---------- identite et session ---------- */
+  .moi { display:flex; align-items:center; gap:8px; padding-left:8px;
+         margin-left:2px; border-left:1px solid var(--trait); }
+  .moi[hidden] { display:none; }
+  .moi-nom { font-weight:600; font-size:12.5px; }
+  .moi-roles { font-size:10.5px; color:var(--doux); text-transform:uppercase;
+               letter-spacing:.04em; }
+  .session {
+    padding:8px 16px; font-size:12.5px; display:flex; gap:12px;
+    align-items:center; border-bottom:1px solid var(--ambre);
+    background:color-mix(in srgb, var(--ambre) 14%, var(--fond2));
+  }
+  .session[hidden] { display:none; }
+
+  /* ---------- graphiques ---------- */
+  /* Couleurs par role. Categoriel : CA en bleu (rang 1), PA en orange
+     (rang 2). Divergent : gain bleu, perte rouge, la ligne zero en neutre.
+     Statut : critique, reserve a la RAM surreservee et toujours accompagne
+     de son pictogramme. Chaque theme a ses propres pas, verifies contre sa
+     propre surface ; le texte ne porte jamais la couleur d'une serie. */
+  :root {
+    --viz-1:#3987e5; --viz-2:#d95926; --viz-perte:#e66767;
+    --viz-tendu:#fab219; --viz-critique:#d03b3b;
+    --viz-grille:#262c36; --viz-base:#4a525e; --viz-muet:#8b949e;
+  }
+  :root[data-theme="light"] {
+    --viz-1:#2a78d6; --viz-2:#eb6834; --viz-perte:#e34948;
+    --viz-tendu:#fab219; --viz-critique:#d03b3b;
+    --viz-grille:#e6e9ed; --viz-base:#b7bfc8; --viz-muet:#59636e;
+  }
+  .viz-mur { display:grid; grid-template-columns:repeat(auto-fit, minmax(380px, 1fr));
+             gap:14px; align-items:start; }
+  /* la capacite liste tous les serveurs : pleine largeur, apres les autres */
+  .viz.large { grid-column:1 / -1; }
+  .viz { margin:0; background:var(--carte); border:1px solid var(--trait);
+         border-radius:var(--r); padding:14px 16px 10px; min-width:0; }
+  .viz figcaption { margin-bottom:8px; }
+  .viz figcaption b { display:block; font-size:13px; }
+  .viz figcaption small { color:var(--doux); font-size:11.5px; }
+  .viz-zone { width:100%; overflow:hidden; }
+  .viz-zone svg { display:block; height:auto; touch-action:auto; }
+  .viz-grille line { stroke:var(--viz-grille); stroke-width:1; shape-rendering:crispEdges; }
+  .viz-grille line.viz-base { stroke:var(--viz-base); }
+  .viz-axe { font-size:10.5px; fill:var(--viz-muet); font-variant-numeric:tabular-nums; }
+  .viz-nom { font-size:11.5px; fill:var(--texte); }
+  .viz-valeur { font-size:11px; fill:var(--doux); font-variant-numeric:tabular-nums; }
+  .viz-valeur.dedans { fill:#fff; font-weight:600; }
+  .viz-valeur.dedans-sombre { fill:#0b0b0b; font-weight:600; }
+  .viz-seuil { stroke:var(--viz-muet); stroke-width:1; stroke-opacity:.7;
+               shape-rendering:crispEdges; }
+  path.viz-gain, path.viz-ca, path.viz-ram { fill:var(--viz-1); }
+  path.viz-pa { fill:var(--viz-2); }
+  path.viz-perte { fill:var(--viz-perte); }
+  path.viz-tendu { fill:var(--viz-tendu); }
+  path.viz-critique { fill:var(--viz-critique); }
+  .viz-cible { fill:transparent; }
+  .viz-rang:hover .viz-cible { fill:var(--accent-doux); }
+  .viz-rang.cliquable { cursor:pointer; }
+  /* survoler une rangee estompe les autres : la comparaison se fait d'un
+     coup d'oeil, sans relire toute la liste */
+  .viz-zone svg:hover .viz-rang path { opacity:.45; }
+  .viz-zone svg:hover .viz-rang:hover path { opacity:1; }
+  .viz-legende { display:flex; gap:14px; font-size:11.5px; color:var(--doux);
+                 margin:-2px 0 6px; }
+  .viz-legende span { display:inline-flex; align-items:center; gap:6px; }
+  .viz-legende i { width:10px; height:10px; border-radius:2px; display:inline-block; }
+  .viz-legende i.viz-ca { background:var(--viz-1); }
+  .viz-legende i.viz-pa { background:var(--viz-2); }
+  .viz-bulle {
+    position:fixed; z-index:20; pointer-events:none; min-width:170px;
+    background:var(--carte); border:1px solid var(--trait2); border-radius:8px;
+    box-shadow:var(--ombre); padding:8px 10px; font-size:12px;
+  }
+  .viz-bulle[hidden] { display:none; }
+  .viz-bulle b { display:block; margin-bottom:4px; }
+  .viz-bulle div { display:flex; justify-content:space-between; gap:16px; }
+  .viz-bulle div span:first-child { color:var(--doux); }
+  .viz-bulle div span:last-child { font-variant-numeric:tabular-nums; }
+  @media (forced-colors: active) {
+    path.viz-gain, path.viz-ca, path.viz-ram, path.viz-pa, path.viz-perte,
+    path.viz-tendu, path.viz-critique { fill:CanvasText; }
+  }
+
+  /* ---------- vues enregistrees et filtres communs ---------- */
+  .rent-vues { display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+               margin-bottom:12px; }
+  .rent-vues[hidden] { display:none; }
+  .rent-vues > label { font-size:10.5px; color:var(--doux);
+                       text-transform:uppercase; letter-spacing:.05em; }
+  .rent-vues select { min-width:220px; font-weight:600; }
+  .vue-modifiee { font-size:11px; color:var(--ambre); border:1px solid var(--ambre);
+                  border-radius:999px; padding:1px 8px; }
+  .vue-modifiee[hidden] { display:none; }
+  .rent-filtres { border:1px solid var(--trait); border-radius:var(--r);
+                  margin:0 0 10px; max-height:none; }
+  .rent-filtres[hidden] { display:none; }
+  .rent-filtres .puce { font:inherit; font-size:12px; color:var(--texte); }
+  .rent-filtres .puce.choisi { background:var(--accent-doux);
+                               border-color:var(--accent); color:var(--accent); }
+  .rent-filtres .effacer { margin-left:auto; }
+  .kpi-note { grid-column:1 / -1; margin:0; font-size:11.5px; }
+  .resume-vue { margin:4px 0 2px; padding-left:18px; font-size:11.5px;
+                color:var(--doux); }
+  .saisie label.case { display:flex; gap:7px; align-items:center;
+                       color:var(--texte); font-size:12px; }
+  .saisie label.case input { width:auto; }
+
+  /* chaque figure : graphique ou tableau, et son export */
+  .viz figcaption { display:flex; flex-wrap:wrap; gap:6px 12px;
+                    align-items:flex-start; }
+  .viz figcaption b, .viz figcaption small { flex:1 0 60%; }
+  .fig-outils { order:2; display:flex; gap:6px; margin-left:auto; }
+  .fig-outils button { padding:2px 8px; font-size:11.5px; }
+  .table-defile.mini { max-height:440px; overflow:auto; }
+  .arbre.mini { min-width:0; }
+  .arbre.mini th { padding:6px 10px; }
+  .arbre.mini tfoot th, .arbre.mini tfoot td {
+    position:sticky; bottom:0; background:var(--carte2); font-weight:600;
+    border-top:1px solid var(--trait2); padding:6px 10px;
+  }
+
   @media (max-width:760px) {
     .stats { display:none; }
     .fiche { width:calc(100% - 28px); }
+    .rent { padding:12px 16px 32px; }
+    .tiroir { left:14px; width:auto; }
   }
 </style>
 </head>
@@ -218,6 +505,7 @@
   <div class="stats" id="stats"></div>
   <div class="stats" id="stats-commerce"></div>
   <div class="outils pousse">
+    <button id="btn-rent" hidden title="PA, CA, ROI et capacité, du cluster à l'élément déclaré">Rentabilité</button>
     <input type="search" id="recherche" placeholder="Rechercher…" autocomplete="off">
     <button id="btn-filtres" title="Afficher ou masquer les filtres">Filtres</button>
     <button id="btn-plier" title="Replier tous les hyperviseurs">Replier</button>
@@ -225,8 +513,13 @@
     <button id="btn-reinit" title="Réinitialiser positions et filtres">Réinitialiser</button>
     <button id="btn-jeton" title="Obtenir un jeton pour le client">Jeton</button>
     <button id="btn-theme" title="Thème clair ou sombre">◐</button>
+    <div class="moi" id="moi" hidden></div>
   </div>
 </header>
+<div class="session" id="session" role="alert" hidden>
+  Ta session a expiré : les chiffres affichés ne se mettent plus à jour.
+  <button id="session-reprendre">Se reconnecter</button>
+</div>
 
 <div class="filtres" id="filtres"></div>
 
@@ -262,6 +555,105 @@
     <div id="fiche-vente"></div>
   </aside>
 </div>
+
+<section class="rent" id="vue-rent" aria-label="Rentabilité">
+  <div class="rent-vues" id="rent-vues" hidden>
+    <label for="rent-vue">Vue</label>
+    <select id="rent-vue"></select>
+    <span class="vue-modifiee" id="vue-modifiee" hidden
+          title="Les filtres ou la présentation ont changé depuis l’ouverture de la vue">modifiée</span>
+    <button id="vue-enregistrer">Enregistrer la vue…</button>
+    <button id="vue-supprimer" class="danger" hidden>Supprimer</button>
+    <span class="lecture" id="vue-auteur"></span>
+  </div>
+  <div class="kpis" id="rent-kpis"></div>
+  <div class="rent-outils">
+    <div class="segment" id="rent-modes" role="group" aria-label="Présentation">
+      <button data-mode="arbre" title="Cluster, serveurs, VM et éléments imbriqués">Arbre</button>
+      <button data-mode="tableau" title="Une ligne par carte, triable par colonne">Tableau</button>
+      <button data-mode="graphiques" title="Résultat, origine du chiffre, capacité, clients">Graphiques</button>
+    </div>
+    <input type="search" id="rent-recherche" class="seul-filtre" autocomplete="off"
+           placeholder="Filtrer : nom, contrat, client…">
+    <label class="puce seul-filtre"><input type="checkbox" id="rent-perte"> à perte</label>
+    <label class="puce seul-filtre"><input type="checkbox" id="rent-alertes"> avec alerte</label>
+    <button id="rent-btn-filtres" title="Clusters, datacenters, clients, genres">Filtres</button>
+    <button id="rent-deplier" class="seul-arbre">Tout déplier</button>
+    <span class="pousse"></span>
+    <button id="rent-journal" title="Qui a saisi quoi, et quand">Journal</button>
+    <a class="bouton" id="rent-export" href="/api/export.csv" download
+       title="Tout l'arbre, une carte par ligne, pour Excel ou Calc">Exporter tout en CSV</a>
+    <button id="rent-export-vue" class="primaire seul-plat"
+            title="Les lignes et colonnes affichées, dans l'ordre du tri">Exporter cette vue</button>
+  </div>
+  <div class="rent-filtres filtres" id="rent-filtres" hidden></div>
+  <div class="rent-outils seul-plat">
+    <div class="segment" id="rent-niveaux" role="group" aria-label="Niveau">
+      <button data-niveau="cluster">Clusters</button>
+      <button data-niveau="serveur">Serveurs</button>
+      <button data-niveau="vm">VM</button>
+      <button data-niveau="element">Éléments</button>
+      <button data-niveau="tout">Tout</button>
+    </div>
+    <span class="lecture" id="plat-compte"></span>
+  </div>
+  <div class="rent-avert" id="rent-avert"></div>
+  <div class="table-defile seul-arbre">
+    <table class="arbre">
+      <thead><tr>
+        <th>Carte</th><th class="num">PA / mois</th><th class="num">CA / mois</th>
+        <th class="num">ROI / mois</th><th class="num">Marge</th>
+        <th>Capacité</th><th></th>
+      </tr></thead>
+      <tbody id="rent-corps"></tbody>
+    </table>
+  </div>
+  <div class="table-defile seul-plat">
+    <table class="arbre plat">
+      <thead id="plat-tete"></thead>
+      <tbody id="plat-corps"></tbody>
+      <tfoot id="plat-pied"></tfoot>
+    </table>
+  </div>
+  <div class="viz-mur seul-graph">
+    <figure class="viz">
+      <figcaption><b>Résultat par cluster</b>
+        <small>ROI mensuel, CA − PA. Un clic ouvre le cluster dans l’arbre.</small></figcaption>
+      <div class="viz-zone" id="viz-roi"></div>
+    </figure>
+    <figure class="viz">
+      <figcaption><b>Ce qui rentre, ce qui sort</b>
+        <small>Chiffre d’affaires et prix d’achat mensuels, par cluster.</small></figcaption>
+      <div class="viz-zone" id="viz-capa"></div>
+    </figure>
+    <figure class="viz">
+      <figcaption><b>Chiffre d’affaires par client</b>
+        <small>Contrats et éléments déclarés, ramenés au mois ; part du CA total.</small></figcaption>
+      <div class="viz-zone" id="viz-clients"></div>
+    </figure>
+    <figure class="viz large">
+      <figcaption><b>RAM allouée par serveur</b>
+        <small>En % de la RAM physique. ▲ au-delà de 85 % l’hôte est tendu, ⚠ au-delà de 100 % il est surréservé.</small></figcaption>
+      <div class="viz-zone" id="viz-ram"></div>
+    </figure>
+  </div>
+  <div class="vente rent-orph" id="rent-orphelins"></div>
+  <p class="rent-pied">
+    Chaque carte cumule ses enfants : PA = achat propre + achats des enfants,
+    CA = vente propre + ventes des enfants, ROI = CA − PA. Tout est ramené au
+    mois. ✎ signale une valeur corrigée à la main. Le ROI d’un serveur est une
+    photo : dans un cluster, les VM migrent d’un nœud à l’autre ; celui du
+    cluster est le chiffre stable.
+  </p>
+  <aside class="fiche tiroir" id="tiroir" aria-live="polite">
+    <button class="fermer" id="tiroir-fermer" title="Fermer">✕</button>
+    <h3 id="tiroir-titre"></h3>
+    <div class="type" id="tiroir-type"></div>
+    <div class="vente" id="tiroir-corps"></div>
+  </aside>
+</section>
+<div class="flash" id="flash" role="status" aria-live="polite"></div>
+<div class="viz-bulle" id="viz-bulle" role="tooltip" hidden></div>
 
 <script>
 const DONNEES = __DATA__;
@@ -596,23 +988,28 @@ document.getElementById('fiche-fermer').onclick = () => {
   fiche.classList.remove('visible'); etat.selection = null; dessiner();
 };
 
-// -------------------------------------------------------------- commercial
-// Le cout vient du snapshot, donc du HTML. Les ventes changent entre deux
-// collectes : elles sont lues a chaud par l'API, sinon il faudrait
-// regenerer la page a chaque contrat saisi.
+// -------------------------------------------------------------- rentabilite
+// Le cout vient du snapshot, les ventes et les saisies changent entre deux
+// collectes : tout est lu a chaud par /api/rentabilite, qui rend l'arbre
+// cluster > serveur > VM > elements deja calcule. La page n'additionne rien
+// elle-meme : le chiffre affiche est celui de l'export CSV, a l'euro pres.
 //
 // Si l'API ne repond pas — page ouverte en fichier, service arrete — tout ce
-// bloc se tait. La topologie doit rester consultable sans le volet
-// commercial, c'est l'inverse qui serait absurde.
+// volet se tait. La topologie doit rester consultable sans lui.
 const commerce = {
-  dispo: false, peutEcrire: false,
-  parCluster: new Map(), parServeur: new Map(), parVm: new Map(),
-  globale: null,
+  dispo: false, peutEcrire: false, globale: null, arbre: [], orphelins: [],
+  index: new Map(),      // "type:cle" -> { carte, chemin }
+  ouverts: new Set(),    // chemins depliés dans la vue
+  premier: true,
 };
 
 const euro = (v, d) => (v === null || v === undefined || v === '') ? '—'
   : new Intl.NumberFormat('fr-FR', { style: 'currency',
       currency: d || 'EUR', maximumFractionDigits: 2 }).format(Number(v));
+const pct = v => (v === null || v === undefined) ? '—'
+  : new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(v) + ' %';
+const go = mb => (mb === null || mb === undefined) ? '?'
+  : new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(mb / 1024) + ' Go';
 
 function classeMarge(v) {
   if (v === null || v === undefined) return 'neutre';
@@ -625,42 +1022,69 @@ function signe(v) {
   return (n > 0 ? '+' : '') + euro(n);
 }
 
-// "standalone:pve-07" et "inconnu:ns1.example" sont des clusters d'un seul
-// membre, fabriques pour que le calcul n'ait qu'un cas a traiter. Ce sont des
-// clefs, pas des noms : rien a afficher a l'operateur.
-function nomCluster(c) {
-  if (!c || c.startsWith('standalone:') || c.startsWith('inconnu:')) return null;
-  return c;
+// Petit constructeur de DOM. Jamais d'innerHTML : les noms viennent de
+// saisies humaines, ils passent tous par textContent.
+function el(tag, props, ...enfants) {
+  const e = Object.assign(document.createElement(tag), props || {});
+  for (const x of enfants) {
+    if (x === null || x === undefined || x === false) continue;
+    e.appendChild(typeof x === 'string' ? document.createTextNode(x) : x);
+  }
+  return e;
+}
+
+const LIBELLE = { cluster: 'Cluster', serveur: 'Serveur', vm: 'VM',
+                  element: 'Élément' };
+const cleIndex = c => c.type + ':' + c.cle;
+
+function indexer() {
+  commerce.index = new Map();
+  const visiter = (c, chemin) => {
+    const ici = chemin.concat([cleIndex(c)]);
+    // deux VM homonymes : la premiere rencontree est celle qui porte les
+    // contrats, comme dans le calcul
+    if (!commerce.index.has(cleIndex(c))) {
+      commerce.index.set(cleIndex(c), { carte: c, chemin: ici });
+    }
+    c.enfants.forEach(e => visiter(e, ici));
+  };
+  commerce.arbre.forEach(c => visiter(c, []));
 }
 
 async function chargerCommerce() {
   try {
-    const [r, v] = await Promise.all([
-      fetch('/api/rentabilite', { headers: { Accept: 'application/json' } }),
-      fetch('/api/commercial', { headers: { Accept: 'application/json' } }),
-    ]);
-    if (!r.ok || !v.ok) throw new Error('http ' + r.status + ' / ' + v.status);
-    const rent = await r.json(), lot = await v.json();
+    const r = await fetch('/api/rentabilite',
+                          { headers: { Accept: 'application/json' } });
+    if (r.status === 401 && commerce.dispo) { sessionExpiree(); return; }
+    if (!r.ok) throw new Error('http ' + r.status);
+    const rent = await r.json();
     commerce.globale = rent.globale || null;
+    commerce.arbre = rent.arbre || [];
+    commerce.orphelins = rent.orphelins || [];
     commerce.peutEcrire = !!rent.peut_ecrire;
-    commerce.parCluster = new Map(
-      (rent.clusters || []).map(c => [c.cluster_name, c]));
-    commerce.parServeur = new Map(
-      (rent.serveurs || []).map(s => [s.ovh_name, s]));
-    commerce.parVm = new Map();
-    for (const x of (lot.ventes || [])) {
-      if (!commerce.parVm.has(x.vm_name)) commerce.parVm.set(x.vm_name, []);
-      commerce.parVm.get(x.vm_name).push(x);
+    indexer();
+    if (commerce.premier) {
+      // a l'ouverture : les clusters ouverts, leurs serveurs visibles
+      commerce.arbre.forEach(c => commerce.ouverts.add(cleIndex(c)));
+      commerce.premier = false;
     }
     commerce.dispo = true;
   } catch (e) {
     commerce.dispo = false;
   }
+  document.getElementById('btn-rent').hidden = !commerce.dispo;
   majStatCommerce();
+  if (vueRent.actif) dessinerRent();
   if (etat.selection) {
     const n = parId.get(etat.selection);
     if (n) ficheCommerce(n);
   }
+}
+
+function chip(titre, valeur, classe) {
+  const b = el('b', { textContent: valeur });
+  if (classe) b.className = 'marge ' + classe;
+  return el('div', { className: 'stat' }, b, el('span', { textContent: titre }));
 }
 
 function majStatCommerce() {
@@ -668,378 +1092,1654 @@ function majStatCommerce() {
   zone.replaceChildren();
   if (!commerce.dispo || !commerce.globale) return;
   const g = commerce.globale;
-  const chip = (titre, valeur, classe) => {
-    const d = document.createElement('div');
-    d.className = 'stat';
-    const b = document.createElement('b');
-    b.textContent = valeur;
-    if (classe) b.className = 'marge ' + classe;
-    d.appendChild(b);
-    d.appendChild(Object.assign(document.createElement('span'),
-                                { textContent: titre }));
-    return d;
-  };
-  zone.appendChild(chip('coût OVH', euro(g.cout_mois)));
-  zone.appendChild(chip('facturé', euro(g.vente_mois)));
-  zone.appendChild(chip('résultat / mois', signe(g.marge_mois),
-                        classeMarge(g.marge_mois)));
-  // a perte se compte par cluster : un noeud de cluster pris seul affiche son
-  // cout face a zero recette, et serait compte a perte a tort
-  if (Number(g.clusters_a_perte) > 0) {
-    zone.appendChild(chip('clusters à perte', g.clusters_a_perte, 'negatif'));
-  }
-  if (Number(g.serveurs_sans_cout) > 0) {
-    zone.appendChild(chip('serveurs sans tarif', g.serveurs_sans_cout));
-  }
-  if (Number(g.nb_orphelins) > 0) {
-    zone.appendChild(chip('contrats orphelins', g.nb_orphelins));
+  zone.append(chip('PA / mois', euro(g.pa)), chip('CA / mois', euro(g.pv)),
+              chip('ROI / mois', signe(g.roi), classeMarge(g.roi)));
+  if (Number(g.groupes_a_perte) > 0) {
+    zone.appendChild(chip('clusters à perte', g.groupes_a_perte, 'negatif'));
   }
 }
 
-// Toutes les VM d'un cluster, d'ou qu'on clique. La collecte n'interrogeant
-// qu'un representant par cluster, les invites pendent tous sous un seul noeud
-// de l'arbre : les chercher par cluster, et non parmi les enfants du serveur
-// clique, est ce qui rend le bouton d'edition utilisable depuis n'importe
-// quel membre.
-function vmDuCluster(cluster) {
-  if (!cluster) return [];
-  const vus = new Set(), sortie = [];
-  for (const n of DONNEES.noeuds) {
-    if (n.kind === 'vm' && n.vm && n.cluster === cluster && !vus.has(n.vm)) {
-      vus.add(n.vm); sortie.push(n);
-    }
+// ------------------------------------------------------- fiche topologie
+// La fiche d'une carte du schema montre le bilan de la carte correspondante
+// de l'arbre, et renvoie vers la vue Rentabilite pour tout le reste.
+function carteDe(n) {
+  if (n.kind === 'srv' && n.ovh) return commerce.index.get('serveur:' + n.ovh);
+  if (n.kind === 'vm' && n.vm) return commerce.index.get('vm:' + n.vm);
+  if (n.kind === 'node') {
+    const srv = parId.get(n.parent);
+    return srv && srv.ovh ? commerce.index.get('serveur:' + srv.ovh) : null;
   }
-  return sortie.sort((a, b) => a.vm.localeCompare(b.vm));
+  return null;
 }
 
 function ficheCommerce(n) {
   const zone = document.getElementById('fiche-vente');
   zone.replaceChildren();
   if (!commerce.dispo) return;
-  if (n.kind === 'srv' && n.ovh) bilanServeur(zone, n);
-  else if (n.kind === 'node' && n.cluster) bilanCluster(zone, n.cluster, null);
-  else if (n.kind === 'vm' && n.vm) bilanVm(zone, n);
-}
+  const trouve = carteDe(n);
+  if (!trouve) return;
+  const c = trouve.carte;
+  const d = el('div', { className: 'vente' }, el('h4', { textContent: 'Rentabilité' }));
+  bilanCarte(d, c);
 
-function bloc(titre) {
-  const d = document.createElement('div');
-  d.className = 'vente';
-  d.appendChild(Object.assign(document.createElement('h4'),
-                              { textContent: titre }));
-  return d;
+  // le cluster du serveur : c'est lui le chiffre stable
+  const cl = commerce.index.get(trouve.chemin[0]);
+  if (c.type !== 'cluster' && cl && cl.carte !== c && !cl.carte.infos.seul) {
+    d.appendChild(el('h5', { textContent: 'Cluster ' + cl.carte.nom }));
+    const ligne = grille(d);
+    ligne('ROI', signe(cl.carte.roi), classeMarge(cl.carte.roi));
+  }
+  if (c.type === 'vm') listeContrats(d, c);
+  d.appendChild(el('div', { className: 'actions' },
+    el('button', { textContent: 'Voir dans la rentabilité',
+                   onclick: () => basculerMode('arbre', trouve.chemin) })));
+  zone.appendChild(d);
 }
 
 function grille(d) {
-  const bilan = document.createElement('div');
-  bilan.className = 'bilan';
+  const bilan = el('div', { className: 'bilan' });
   d.appendChild(bilan);
   return (k, v, classe) => {
-    bilan.appendChild(Object.assign(document.createElement('span'),
-                                    { textContent: k }));
-    const b = document.createElement('b');
-    b.textContent = v;
+    const b = el('b', { textContent: v });
     if (classe) b.className = 'marge ' + classe;
-    bilan.appendChild(b);
+    bilan.append(el('span', { textContent: k }), b);
   };
 }
 
-function note(d, texte) {
-  d.appendChild(Object.assign(document.createElement('p'),
-                              { className: 'lecture', textContent: texte }));
-}
-
-// Un dedie coute seul, mais ne rapporte pas seul : ses VM migrent entre ses
-// freres de cluster. Son cout propre et le resultat du cluster sont donc deux
-// blocs distincts, et il n'y a volontairement pas de marge par serveur.
-//
-// Sauf s'il est seul : les deux blocs diraient alors le meme cout, et repeter
-// un chiffre fait douter qu'il s'agisse du meme. Un seul bloc dans ce cas.
-function bilanServeur(zone, n) {
-  const s = commerce.parServeur.get(n.ovh);
-  const r = commerce.parCluster.get(n.cluster);
-  if (!r || Number(r.nb_serveurs) <= 1) {
-    bilanCluster(zone, n.cluster, n.ovh, s);
-    return;
-  }
-  const d = bloc('Ce serveur');
+function bilanCarte(d, c) {
   const ligne = grille(d);
-  ligne('Coût OVH', euro(s && s.cout_mois, s && s.devise));
-  if (s && s.pve_node) ligne('Nœud PVE', s.pve_node);
-  ligne('Cluster', nomCluster(n.cluster) || 'nœud seul');
-  if (s && (s.cout_mois === null || s.cout_mois === undefined)) {
-    note(d, 'Aucun tarif relevé pour ce serveur : il manque au coût du '
-          + 'cluster, et le résultat ci-dessous est donc optimiste.');
+  ligne('PA', euro(c.pa) + (c.corrections.prix_achat ? ' ✎' : ''));
+  ligne('CA', euro(c.pv) + (c.corrections.prix_vente ? ' ✎' : ''));
+  ligne('ROI', signe(c.roi), classeMarge(c.roi));
+  if (c.type === 'serveur' && c.pa_auto !== null && c.corrections.prix_achat) {
+    ligne('Coût OVH collecté', euro(c.pa_auto));
   }
-  zone.appendChild(d);
-  bilanCluster(zone, n.cluster, n.ovh);
+  for (const [champ, k] of Object.entries(c.corrections)) {
+    d.appendChild(el('p', { className: 'lecture',
+      textContent: '✎ ' + champ.replace('_', ' ') + ' corrigé par ' + k.par
+        + (k.motif ? ' : « ' + k.motif + ' »' : '') }));
+  }
+  for (const a of c.alertes) {
+    d.appendChild(el('p', { className: 'lecture alerte', textContent: '⚠ ' + a }));
+  }
 }
 
-// Le cluster est la maille du resultat : c'est lui qui porte un cout et une
-// recette comparables. Une VM migre entre ses noeuds, elle n'appartient a
-// aucun ; repartir le resultat par serveur ferait porter a un noeud la
-// recette de ses freres, qui passeraient pour etre a perte.
-// seul : la fiche du serveur isole, qui vient alors se fondre dans ce bloc
-function bilanCluster(zone, cluster, ovhCourant, seul) {
-  const r = commerce.parCluster.get(cluster);
-  const nom = nomCluster(cluster);
-  const plusieurs = r && Number(r.nb_serveurs) > 1;
-  const d = bloc(nom ? 'Rentabilité du cluster ' + nom : 'Rentabilité');
-
-  const ligne = grille(d);
-  ligne('Coût OVH', euro(r && r.cout_mois, r && r.devise));
-  if (seul && seul.pve_node) ligne('Nœud PVE', seul.pve_node);
-  ligne('Facturé', euro(r && r.vente_mois));
-  ligne('Résultat', r ? signe(r.marge_mois) : '—',
-        classeMarge(r && r.marge_mois));
-  if (plusieurs) ligne('Mutualisé sur', r.nb_serveurs + ' serveurs');
-
-  if (!r) {
-    note(d, 'Cluster absent du calcul : relance une collecte.');
-    zone.appendChild(d);
-    return;
+function listeContrats(d, c) {
+  const contrats = c.infos.contrats || [];
+  d.appendChild(el('h5', { textContent: 'Contrats' }));
+  if (!contrats.length) {
+    d.appendChild(el('p', { className: 'lecture',
+                            textContent: 'Aucun contrat sur cette VM.' }));
   }
-  if (Number(r.serveurs_sans_cout) > 0) {
-    note(d, plusieurs
-      ? r.serveurs_sans_cout + ' serveur(s) de ce cluster sans tarif relevé : '
-        + 'le coût affiché est incomplet.'
-      : 'Aucun tarif relevé pour ce serveur : le résultat ne compte que les '
-        + 'ventes, il est donc optimiste.');
-  }
-
-  // Les membres du cluster. C'est ce qu'un technicien vient chercher : quel
-  // dedie porte quel cluster, et avec qui il le partage.
-  if (plusieurs && r.serveurs) {
-    d.appendChild(Object.assign(document.createElement('h5'),
-                                { textContent: 'Membres' }));
-    const courant = ovhCourant && commerce.parServeur.get(ovhCourant);
-    const ul = document.createElement('ul');
-    for (const nomSrv of String(r.serveurs).split(' ').filter(Boolean)) {
-      const li = document.createElement('li');
-      const ici = courant && courant.reverse_name === nomSrv;
-      li.appendChild(Object.assign(document.createElement('span'),
-        { className: 'nom',
-          textContent: nomSrv + (ici ? ' · celui-ci' : '') }));
-      ul.appendChild(li);
+  const ul = el('ul');
+  for (const v of contrats) {
+    const li = el('li', null,
+      el('span', { className: 'nom',
+                   textContent: v.contrat + (v.client ? ' · ' + v.client : '') }),
+      el('span', { className: 'prix',
+                   textContent: euro(v.prix_vente, v.devise) + ' / ' + v.periode }));
+    if (commerce.peutEcrire) {
+      li.appendChild(el('button', { textContent: 'Éditer',
+        onclick: () => formVente(c.cle, v) }));
     }
-    d.appendChild(ul);
+    ul.appendChild(li);
   }
-
-  // Les VM du cluster, avec le bouton de saisie : accessible depuis n'importe
-  // lequel de ses serveurs, puisque la VM n'appartient a aucun en particulier.
-  const vms = vmDuCluster(cluster);
-  if (vms.length) {
-    d.appendChild(Object.assign(document.createElement('h5'),
-                                { textContent: 'Invités' }));
-    const ul = document.createElement('ul');
-    for (const k of vms) {
-      const ventes = commerce.parVm.get(k.vm) || [];
-      const li = document.createElement('li');
-      li.appendChild(Object.assign(document.createElement('span'),
-        { className: 'nom', textContent: k.vm }));
-      if (ventes.length) {
-        const total = ventes.reduce((somme, v) =>
-          somme + (v.periode === 'an' ? v.prix_vente / 12 : v.prix_vente), 0);
-        li.appendChild(Object.assign(document.createElement('span'),
-          { className: 'prix', textContent: euro(total) }));
-      } else {
-        li.appendChild(Object.assign(document.createElement('span'),
-          { className: 'rien', textContent: 'non vendue' }));
-      }
-      if (commerce.peutEcrire) {
-        const b = document.createElement('button');
-        b.textContent = ventes.length ? 'Éditer' : '+';
-        b.title = ventes.length ? 'Corriger le contrat de ' + k.vm
-                                : 'Enregistrer une vente pour ' + k.vm;
-        b.onclick = () => ouvrirFormulaire(d, k.vm, ventes[0] || null);
-        li.appendChild(b);
-      }
-      ul.appendChild(li);
-    }
-    d.appendChild(ul);
-  }
-
-  if (!commerce.peutEcrire) {
-    note(d, 'Lecture seule : ton compte n’est pas déclaré comme commercial.');
-  }
-  zone.appendChild(d);
-}
-
-function bilanVm(zone, n) {
-  const ventes = commerce.parVm.get(n.vm) || [];
-  const d = bloc('Contrat');
-
-  if (ventes.length) {
-    const ul = document.createElement('ul');
-    for (const v of ventes) {
-      const li = document.createElement('li');
-      li.appendChild(Object.assign(document.createElement('span'),
-        { className: 'nom',
-          textContent: v.contrat + (v.client ? ' · ' + v.client : '') }));
-      li.appendChild(Object.assign(document.createElement('span'),
-        { className: 'prix',
-          textContent: euro(v.prix_vente, v.devise) + ' / ' + v.periode }));
-      if (commerce.peutEcrire) {
-        const b = document.createElement('button');
-        b.textContent = 'Éditer';
-        b.onclick = () => ouvrirFormulaire(d, n.vm, v);
-        li.appendChild(b);
-      }
-      ul.appendChild(li);
-    }
-    d.appendChild(ul);
-  } else {
-    d.appendChild(Object.assign(document.createElement('p'),
-      { className: 'lecture', textContent: 'Aucun contrat sur cette VM.' }));
-  }
-
+  if (contrats.length) d.appendChild(ul);
   if (commerce.peutEcrire) {
-    const b = document.createElement('button');
-    b.textContent = ventes.length ? 'Ajouter un contrat' : 'Enregistrer la vente';
-    b.onclick = () => ouvrirFormulaire(d, n.vm, null);
-    d.appendChild(b);
-  } else {
-    d.appendChild(Object.assign(document.createElement('p'),
-      { className: 'lecture',
-        textContent: 'Lecture seule : ton compte n’est pas déclaré comme ' +
-                     'commercial.' }));
+    d.appendChild(el('button', { textContent: 'Ajouter un contrat',
+                                 onclick: () => formVente(c.cle, null) }));
   }
-  zone.appendChild(d);
 }
 
-function champ(parent, etiquette, attrs) {
-  parent.appendChild(Object.assign(document.createElement('label'),
-    { textContent: etiquette, htmlFor: attrs.id }));
-  const i = Object.assign(document.createElement('input'), attrs);
-  parent.appendChild(i);
+// ------------------------------------------------------------- vue arbre
+const vueRent = { actif: false, filtre: '', perte: false, alertes: false,
+                  mode: 'graphiques', figures: {} };
+
+function basculerRent(actif) {
+  vueRent.actif = actif;
+  document.body.classList.toggle('mode-rent', actif);
+  document.getElementById('btn-rent').classList.toggle('actif', actif);
+  if (actif) dessinerRent();
+  else { fermerTiroir(); appliquerVue(); }
+}
+
+function ouvrirRent(chemin) {
+  // deplie tout le chemin jusqu'a la carte, et la met en evidence
+  chemin.slice(0, -1).forEach(k => commerce.ouverts.add(k));
+  vueRent.cible = chemin[chemin.length - 1];
+  // un filtre pourrait cacher la carte qu'on vient demander
+  effacerFiltres();
+  majBoutonFiltres();
+  basculerRent(true);
+  const tr = document.querySelector('tr[data-cle="' + CSS.escape(vueRent.cible) + '"]');
+  if (tr) tr.scrollIntoView({ block: 'center' });
+}
+
+function dessinerRent() {
+  const g = commerce.globale;
+  const kpis = document.getElementById('rent-kpis');
+  kpis.replaceChildren();
+  if (!commerce.dispo || !g) {
+    kpis.appendChild(el('p', { className: 'lecture',
+      textContent: 'Le service de rentabilité ne répond pas.' }));
+    return;
+  }
+  const marge = g.pv ? Math.round(100 * g.roi / g.pv) : null;
+  kpis.append(
+    kpi('PA', euro(g.pa), 'achats par mois'),
+    kpi('CA', euro(g.pv), 'ventes par mois'),
+    kpi('ROI', signe(g.roi), marge === null ? '' : 'marge ' + marge + ' %',
+        classeMarge(g.roi)),
+    kpi('Parc', g.nb_serveurs + ' serveurs',
+        g.nb_clusters + ' clusters · ' + g.nb_vm + ' VM'),
+    kpi('À perte', String(g.groupes_a_perte),
+        g.serveurs_a_perte + ' serveur(s) pris seuls',
+        g.groupes_a_perte ? 'negatif' : ''),
+  );
+  if (g.capacite && g.capacite.ram_pct !== undefined) {
+    kpis.appendChild(kpi('RAM allouée', pct(g.capacite.ram_pct),
+      go(g.capacite.ram_libre_mb) + ' libres',
+      g.capacite.ram_pct > 100 ? 'negatif' : ''));
+  }
+
+  if (filtreRentActif()) {
+    kpis.appendChild(el('p', { className: 'lecture kpi-note', textContent:
+      'Indicateurs du parc entier. Les filtres s’appliquent à l’arbre, au '
+      + 'tableau et aux graphiques ci-dessous ; un montant affiché reste le '
+      + 'total de sa carte.' }));
+  }
+  const avert = document.getElementById('rent-avert');
+  avert.replaceChildren();
+  const lignes = [...g.alertes];
+  if (g.serveurs_sans_tarif) {
+    lignes.push(g.serveurs_sans_tarif + ' serveur(s) sans tarif OVH : PA '
+      + 'sous-estimé. Corrige-les à la main, ou donne le droit GET /services '
+      + 'à la clef OVH.');
+  }
+  if (g.nb_orphelins) {
+    lignes.push(g.nb_orphelins + ' saisie(s) hors parc, comptée(s) dans le '
+      + 'total : ' + euro(g.pv_hors_parc) + ' de CA, ' + euro(g.pa_hors_parc)
+      + ' de PA. Détail en bas de page.');
+  }
+  lignes.forEach(t => avert.appendChild(el('p', { textContent: '⚠ ' + t })));
+
+  if (vueRent.mode === 'tableau') dessinerPlat();
+  else if (vueRent.mode === 'graphiques') dessinerGraphes();
+  else dessinerArbre();
+  dessinerOrphelins();
+  majModifiee();
+}
+
+function dessinerArbre() {
+  const corps = document.getElementById('rent-corps');
+  corps.replaceChildren();
+  const filtre = vueRent.filtre || vueRent.perte || vueRent.alertes;
+  const ajouter = (c, prof, chemin) => {
+    if (filtre && !garde(c)) return;
+    const k = chemin.concat([cleIndex(c)]);
+    const cle = k[k.length - 1];
+    const ouvert = filtre || commerce.ouverts.has(k.join('>'))
+                   || commerce.ouverts.has(cle);
+    corps.appendChild(ligneRent(c, prof, k, ouvert));
+    if (ouvert) c.enfants.forEach(e => ajouter(e, prof + 1, k));
+  };
+  commerce.arbre.forEach(c => ajouter(c, 0, []));
+  if (!corps.children.length) {
+    corps.appendChild(el('tr', null, el('td', { colSpan: 7,
+      className: 'lecture', textContent: 'Aucune carte ne correspond.' })));
+  }
+}
+
+function dessinerOrphelins() {
+  const orph = document.getElementById('rent-orphelins');
+  orph.replaceChildren();
+  if (commerce.orphelins.length) {
+    orph.appendChild(el('h4', { textContent: 'Hors parc' }));
+    orph.appendChild(el('p', { className: 'lecture', textContent:
+      'Ces saisies ne se rattachent à rien de l’inventaire : VM détruite ou '
+      + 'renommée, parent retiré. Elles restent comptées dans le total.' }));
+    const ul = el('ul');
+    for (const o of commerce.orphelins) {
+      ul.appendChild(el('li', null,
+        el('span', { className: 'nom', textContent: o.genre + ' · ' + o.nom
+          + (o.contrat ? ' · ' + o.contrat : '') }),
+        el('span', { className: 'lecture', textContent: o.motif }),
+        el('span', { className: 'prix', textContent: euro(o.pv) })));
+    }
+    orph.appendChild(ul);
+  }
+}
+
+function kpi(titre, valeur, sous, classe) {
+  const b = el('b', { textContent: valeur });
+  if (classe) b.className = 'marge ' + classe;
+  return el('div', { className: 'kpi' }, el('span', { textContent: titre }), b,
+            el('small', { textContent: sous || '' }));
+}
+
+function jauge(cap) {
+  if (!cap || cap.ram_pct === undefined) return el('span', { className: 'lecture', textContent: '—' });
+  const p = cap.ram_pct;
+  const barre = el('i');
+  barre.style.width = Math.min(100, p) + '%';
+  const cadre = el('span', { className: 'jauge' + (p > 100 ? ' trop'
+                                    : p >= 85 ? ' tendue' : '') }, barre);
+  const txt = 'RAM ' + pct(p)
+    + (cap.vcpu_ratio !== undefined ? ' · vCPU ' + cap.vcpu_ratio.toLocaleString('fr-FR') + '×' : '');
+  return el('span', { className: 'capa', title: go(cap.alloue.ram_mb) + ' alloués sur '
+    + go(cap.physique.ram_mb) + ' · ' + cap.alloue.vcpu + ' vCPU sur '
+    + (cap.physique.vcpu || '?') + ' threads' }, cadre, el('small', { textContent: txt }));
+}
+
+function ligneRent(c, prof, chemin, ouvert) {
+  const cle = chemin.join('>');
+  const tr = el('tr', { className: 'r-' + c.type
+    + (vueRent.cible === chemin[chemin.length - 1] ? ' cible' : '') });
+  tr.dataset.cle = chemin[chemin.length - 1];
+
+  // nom, indente, avec le bouton de pliage
+  const td = el('td', { className: 'nom' });
+  td.style.paddingLeft = (8 + prof * 18) + 'px';
+  if (c.enfants.length) {
+    td.appendChild(el('button', { className: 'pli', textContent: ouvert ? '▾' : '▸',
+      title: ouvert ? 'Replier' : 'Déplier', ariaExpanded: String(ouvert),
+      onclick: () => {
+        if (ouvert) { commerce.ouverts.delete(cle); commerce.ouverts.delete(chemin[chemin.length - 1]); }
+        else commerce.ouverts.add(cle);
+        vueRent.cible = null;
+        dessinerRent();
+      } }));
+  } else {
+    td.appendChild(el('span', { className: 'pli vide' }));
+  }
+  td.appendChild(el('span', { className: 'genre', textContent:
+    c.type === 'element' ? (c.infos.genre || 'élément')
+    : c.type === 'cluster' && c.infos.seul ? 'nœud seul'
+    : LIBELLE[c.type] }));
+  td.appendChild(el('span', { className: 'titre', textContent: c.nom }));
+  const sous = [];
+  if (c.type === 'cluster' && c.infos.manuel) sous.push('regroupement manuel');
+  if (c.type === 'cluster' && c.infos.datacenters) sous.push(c.infos.datacenters.join(' '));
+  if (c.type === 'serveur') sous.push([c.infos.offre, c.infos.datacenter, c.infos.noeud].filter(Boolean).join(' · '));
+  if (c.type === 'vm') sous.push([c.infos.vmid, c.infos.statut, (c.infos.cpus || '?') + ' vCPU', go(c.infos.ram_mb)].filter(Boolean).join(' · '));
+  if (c.type === 'element') sous.push([c.infos.client, c.infos.contrat].filter(Boolean).join(' · '));
+  if (c.type === 'vm' && (c.infos.contrats || []).length) {
+    sous.push(c.infos.contrats.length + ' contrat(s)');
+  }
+  if (sous.filter(Boolean).length) td.appendChild(el('small', { textContent: sous.filter(Boolean).join(' · ') }));
+  if (c.alertes.length) {
+    td.appendChild(el('span', { className: 'alerte', textContent: '⚠',
+                                title: c.alertes.join('\n') }));
+  }
+  tr.appendChild(td);
+
+  const montant = (v, corrige, titre) => {
+    const t = el('td', { className: 'num', textContent: euro(v) });
+    if (corrige) { t.classList.add('corrige'); t.title = titre; }
+    return t;
+  };
+  const cp = c.corrections.prix_achat, cv = c.corrections.prix_vente;
+  tr.appendChild(montant(c.pa, cp, cp ? 'PA propre corrigé à ' + euro(cp.valeur)
+    + (cp.auto !== null ? ' (collecté : ' + euro(cp.auto) + ')' : '')
+    + ' par ' + cp.par + ' — ' + cp.motif : ''));
+  tr.appendChild(montant(c.pv, cv, cv ? 'PV propre corrigé à ' + euro(cv.valeur)
+    + ' par ' + cv.par + ' — ' + cv.motif : ''));
+  const roi = el('td', { className: 'num marge ' + classeMarge(c.roi),
+                         textContent: signe(c.roi) });
+  tr.appendChild(roi);
+  tr.appendChild(el('td', { className: 'num doux',
+    textContent: c.pv ? Math.round(100 * c.roi / c.pv) + ' %' : '—' }));
+  tr.appendChild(el('td', null, (c.type === 'cluster' || c.type === 'serveur')
+    ? jauge(c.capacite) : el('span')));
+
+  tr.appendChild(actionsCarte(c));
+  return tr;
+}
+
+// les memes boutons dans l'arbre et dans le tableau
+function actionsCarte(c) {
+  const act = el('td', { className: 'act' });
+  if (commerce.peutEcrire) {
+    act.appendChild(el('button', { textContent: '+ enfant',
+      title: 'Déclarer un élément sous ' + c.nom,
+      onclick: () => formElement(c, null) }));
+    if (c.type === 'element') {
+      act.appendChild(el('button', { textContent: 'Éditer',
+                                     onclick: () => formElement(null, c) }));
+    } else {
+      act.appendChild(el('button', { textContent: 'Corriger',
+                                     onclick: () => formCorrection(c) }));
+    }
+    if (c.type === 'vm') {
+      act.appendChild(el('button', { textContent: 'Contrat',
+                                     onclick: () => formVente(c.cle, null) }));
+    }
+  }
+  return act;
+}
+
+// ----------------------------------------------------------- vue tableau
+// Les memes cartes que l'arbre, a plat : une ligne par carte d'un niveau,
+// des colonnes propres a ce niveau, un tri par colonne. Rien n'est recalcule
+// ici, les montants sont ceux de l'API ; l'export reprend exactement ce qui
+// est affiche — lignes filtrees, colonnes du niveau, ordre du tri.
+const NIVEAUX = [
+  ['cluster', 'Clusters'], ['serveur', 'Serveurs'], ['vm', 'VM'],
+  ['element', 'Éléments'], ['tout', 'Tout'],
+];
+
+const n0 = v => (v === null || v === undefined || v === '') ? null : Number(v);
+const marge = c => c.pv ? Math.round(1000 * c.roi / c.pv) / 10 : null;
+const contrats = c => (c.infos.contrats || []);
+const corrigees = c => Object.entries(c.corrections)
+  .map(([k, v]) => k.replace('_', ' ') + ' = ' + v.valeur).join(', ');
+
+// id, titre, valeur brute (tri et CSV), format a l'ecran, niveaux ou elle
+// figure. num : nombre (aligne a droite, virgule decimale dans le CSV).
+const COLONNES_PLAT = [
+  { id: 'type', titre: 'Type', niv: ['tout'],
+    val: r => LIBELLE[r.c.type] },
+  { id: 'nom', titre: 'Nom', niv: ['cluster', 'serveur', 'vm', 'element', 'tout'],
+    val: r => r.c.nom },
+  { id: 'cluster', titre: 'Cluster', niv: ['serveur', 'vm', 'element', 'tout'],
+    val: r => r.cluster },
+  { id: 'serveur', titre: 'Serveur', niv: ['vm', 'element'],
+    val: r => r.serveur },
+  { id: 'parent', titre: 'Rattaché à', niv: ['element'],
+    val: r => r.parent },
+  { id: 'genre', titre: 'Genre', niv: ['element'],
+    val: r => r.c.infos.genre },
+  { id: 'offre', titre: 'Offre', niv: ['serveur'], val: r => r.c.infos.offre },
+  { id: 'dc', titre: 'DC', niv: ['cluster', 'serveur'],
+    val: r => r.c.infos.datacenter || (r.c.infos.datacenters || []).join(' ') },
+  { id: 'noeud', titre: 'Nœud', niv: ['serveur', 'vm'], val: r => r.c.infos.noeud },
+  { id: 'nb_srv', titre: 'Serveurs', niv: ['cluster'], num: true, dec: 0,
+    val: r => r.c.enfants.filter(e => e.type === 'serveur').length },
+  { id: 'nb_vm', titre: 'VM', niv: ['cluster', 'serveur'], num: true, dec: 0,
+    val: r => r.nbVm },
+  { id: 'vmid', titre: 'VMID', niv: ['vm'], num: true, dec: 0,
+    val: r => n0(r.c.infos.vmid) },
+  { id: 'statut', titre: 'État', niv: ['vm'], val: r => r.c.infos.statut },
+  { id: 'vcpu', titre: 'vCPU', niv: ['vm'], num: true, dec: 0,
+    val: r => n0(r.c.infos.cpus) },
+  { id: 'ram', titre: 'RAM (Go)', niv: ['vm'], num: true, dec: 1,
+    val: r => r.c.infos.ram_mb ? r.c.infos.ram_mb / 1024 : null },
+  { id: 'contrat', titre: 'Contrat', niv: ['vm', 'element'],
+    val: r => r.c.type === 'vm' ? contrats(r.c).map(v => v.contrat).join(', ')
+                                : r.c.infos.contrat },
+  { id: 'client', titre: 'Client', niv: ['vm', 'element'],
+    val: r => r.c.type === 'vm'
+      ? [...new Set(contrats(r.c).map(v => v.client).filter(Boolean))].join(', ')
+      : r.c.infos.client },
+  { id: 'nb_el', titre: 'Éléments', niv: ['vm'], num: true, dec: 0,
+    val: r => r.c.enfants.filter(e => e.type === 'element').length },
+  { id: 'pa_auto', titre: 'Coût OVH', niv: ['serveur'], num: true, euro: true,
+    val: r => n0(r.c.pa_auto) },
+  { id: 'pa', titre: 'PA / mois', niv: ['cluster', 'serveur', 'vm', 'element', 'tout'],
+    num: true, euro: true, somme: true, val: r => r.c.pa },
+  { id: 'pv', titre: 'CA / mois', niv: ['cluster', 'serveur', 'vm', 'element', 'tout'],
+    num: true, euro: true, somme: true, val: r => r.c.pv },
+  { id: 'roi', titre: 'ROI / mois', niv: ['cluster', 'serveur', 'vm', 'element', 'tout'],
+    num: true, euro: true, somme: true, signe: true, val: r => r.c.roi },
+  { id: 'marge', titre: 'Marge %', niv: ['cluster', 'serveur', 'vm', 'element', 'tout'],
+    num: true, dec: 1, val: r => marge(r.c) },
+  { id: 'ram_pct', titre: 'RAM allouée %', niv: ['cluster', 'serveur'],
+    num: true, dec: 1, val: r => n0((r.c.capacite || {}).ram_pct) },
+  { id: 'ram_libre', titre: 'RAM libre (Go)', niv: ['cluster', 'serveur'],
+    num: true, dec: 0, val: r => (r.c.capacite || {}).ram_libre_mb === undefined
+      ? null : r.c.capacite.ram_libre_mb / 1024 },
+  { id: 'vcpu_ratio', titre: 'vCPU / thread', niv: ['cluster', 'serveur'],
+    num: true, dec: 2, val: r => n0((r.c.capacite || {}).vcpu_ratio) },
+  { id: 'corr', titre: 'Corrections', niv: ['cluster', 'serveur', 'vm'],
+    val: r => corrigees(r.c) },
+  { id: 'alertes', titre: 'Alertes', niv: ['cluster', 'serveur', 'tout'],
+    val: r => r.c.alertes.join(' ; ') },
+];
+
+const plat = {
+  niveau: 'serveur', tri: null, sens: 1,   // tri null : ordre de l'arbre
+};
+// Ce navigateur se souvient de la vue choisie et de la presentation de
+// chaque figure. Le reste — filtres, mode, niveau — appartient a la vue :
+// rouvrir la page rouvre la vue telle qu'enregistree.
+const prefsRent = { vue: '' };
+try {
+  const s = JSON.parse(localStorage.getItem(CLE + ':rent') || '{}');
+  if (s.vue !== undefined) prefsRent.vue = String(s.vue);
+  if (s.figures) vueRent.figures = s.figures;
+} catch (e) { /* stockage indisponible : vue d'ensemble */ }
+function sauverRent() {
+  try {
+    localStorage.setItem(CLE + ':rent', JSON.stringify({
+      vue: vues.courante ? vues.courante.id : '', figures: vueRent.figures }));
+  } catch (e) { /* sans persistance */ }
+}
+
+function lignesPlat() {
+  const lignes = aplatir().filter(r =>
+    (plat.niveau === 'tout' || r.c.type === plat.niveau) && correspondRent(r));
+  const col = COLONNES_PLAT.find(k => k.id === plat.tri);
+  if (col) {
+    const cmp = col.num
+      ? (a, b) => (col.val(a) ?? -Infinity) - (col.val(b) ?? -Infinity)
+      : (a, b) => String(col.val(a) || '').localeCompare(
+          String(col.val(b) || ''), 'fr', { numeric: true, sensitivity: 'base' });
+    lignes.sort((a, b) => plat.sens * cmp(a, b) || a.ordre - b.ordre);
+  }
+  return lignes;
+}
+
+const colonnesNiveau = () => COLONNES_PLAT.filter(k => k.niv.includes(plat.niveau));
+
+function formatCellule(k, v) {
+  if (v === null || v === undefined || v === '') return '—';
+  if (k.euro) return k.signe ? signe(v) : euro(v);
+  if (k.num) return Number(v).toLocaleString('fr-FR',
+    { maximumFractionDigits: k.dec ?? 2 });
+  return String(v);
+}
+
+function dessinerPlat() {
+  const cols = colonnesNiveau();
+  const lignes = lignesPlat();
+  document.querySelectorAll('#rent-niveaux button').forEach(b =>
+    b.classList.toggle('actif', b.dataset.niveau === plat.niveau));
+
+  const tete = document.getElementById('plat-tete');
+  tete.replaceChildren(el('tr', null, ...cols.map(k => {
+    const fleche = plat.tri === k.id ? (plat.sens > 0 ? ' ▲' : ' ▼') : '';
+    const th = el('th', { className: k.num ? 'num' : '', scope: 'col' },
+      el('button', { className: 'tri', textContent: k.titre + fleche,
+        title: 'Trier par ' + k.titre.toLowerCase(),
+        onclick: () => {
+          // trois etats : croissant, decroissant, ordre de l'arbre
+          if (plat.tri !== k.id) { plat.tri = k.id; plat.sens = k.num ? -1 : 1; }
+          else if (plat.sens === (k.num ? -1 : 1)) plat.sens = -plat.sens;
+          else plat.tri = null;
+          dessinerPlat();
+        } }));
+    if (plat.tri === k.id) th.ariaSort = plat.sens > 0 ? 'ascending' : 'descending';
+    return th;
+  }), el('th')));
+
+  const corps = document.getElementById('plat-corps');
+  corps.replaceChildren();
+  for (const r of lignes) {
+    const tr = el('tr', { className: 'r-' + r.c.type, title: 'Voir dans l’arbre' });
+    for (const k of cols) {
+      const v = k.val(r);
+      const td = el('td', { textContent: formatCellule(k, v) });
+      if (k.num) td.className = 'num';
+      if (k.signe) td.className += ' marge ' + classeMarge(v);
+      if (k.id === 'pa' && r.c.corrections.prix_achat) td.classList.add('corrige');
+      if (k.id === 'pv' && r.c.corrections.prix_vente) td.classList.add('corrige');
+      if (k.id === 'ram_pct' && v !== null) {
+        td.classList.add(v > 100 ? 'trop' : v >= 85 ? 'tendue' : 'ok');
+      }
+      if (k.id === 'nom') td.className = 'nom-plat';
+      tr.appendChild(td);
+    }
+    tr.appendChild(actionsCarte(r.c));
+    tr.onclick = ev => { if (ev.target.tagName !== 'BUTTON') basculerMode('arbre', r.chemin); };
+    corps.appendChild(tr);
+  }
+  if (!lignes.length) {
+    corps.appendChild(el('tr', null, el('td', { colSpan: cols.length + 1,
+      className: 'lecture', textContent: 'Aucune ligne ne correspond.' })));
+  }
+
+  // un total n'a de sens que sur un seul niveau : sur « Tout », chaque
+  // montant est deja compte dans celui de son parent
+  const pied = document.getElementById('plat-pied');
+  pied.replaceChildren();
+  if (lignes.length && plat.niveau !== 'tout') {
+    pied.appendChild(el('tr', null, ...cols.map((k, i) => {
+      if (i === 0) return el('th', { scope: 'row',
+        textContent: lignes.length + ' ligne' + (lignes.length > 1 ? 's' : '') });
+      if (!k.somme) return el('td');
+      const s = lignes.reduce((t, r) => t + Number(k.val(r) || 0), 0);
+      return el('td', { className: 'num' + (k.signe ? ' marge ' + classeMarge(s) : ''),
+                        textContent: formatCellule(k, s) });
+    }), el('td')));
+  }
+  document.getElementById('plat-compte').textContent =
+    lignes.length + ' ligne' + (lignes.length > 1 ? 's' : '');
+  majModifiee();
+}
+
+// ------------------------------------------------- export de la vue en CSV
+// Memes regles que l'export serveur (rentabilite.py) : UTF-8 avec BOM pour
+// qu'Excel reconnaisse les accents, point-virgule, virgule decimale sans
+// separateur de milliers pour que les montants restent des nombres, et une
+// apostrophe devant tout texte qui commencerait par = + - @ : un nom de site
+// ne doit pas s'executer comme une formule chez la personne qui ouvre le
+// fichier. Un montant negatif, lui, reste un nombre.
+function celluleCsv(k, v) {
+  if (v === null || v === undefined || v === '') return '';
+  let t;
+  if (k.num) {
+    t = Number(v).toFixed(k.euro ? 2 : (k.dec ?? 2)).replace('.', ',');
+  } else {
+    t = String(v).replace(/[\r\n]+/g, ' ');
+    if (/^[=+\-@\t]/.test(t)) t = "'" + t;
+  }
+  return /[;"\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+}
+
+function texteCsv(colonnes, lignes) {
+  const entete = colonnes.map(k => celluleCsv({}, k.titre + (k.euro ? ' (€)' : '')));
+  const corps = lignes.map(r => colonnes.map(k => celluleCsv(k, k.val(r))).join(';'));
+  return '\ufeff' + [entete.join(';'), ...corps].join('\r\n') + '\r\n';
+}
+
+const csvVue = () => texteCsv(colonnesNiveau(), lignesPlat());
+
+function telechargerCsv(base, colonnes, lignes) {
+  const nom = base + '-' + new Date().toISOString().slice(0, 10) + '.csv';
+  const url = URL.createObjectURL(new Blob([texteCsv(colonnes, lignes)],
+                                           { type: 'text/csv;charset=utf-8' }));
+  const a = el('a', { href: url, download: nom });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function exporterVue() {
+  const lignes = lignesPlat();
+  telechargerCsv('rentabilite-' + plat.niveau, colonnesNiveau(), lignes);
+  flash(lignes.length + ' lignes exportées.');
+}
+
+function basculerMode(mode, chemin) {
+  vueRent.mode = mode;
+  sauverRent();
+  document.body.classList.toggle('mode-plat', mode === 'tableau');
+  document.body.classList.toggle('mode-graph', mode === 'graphiques');
+  cacherBulle();
+  document.querySelectorAll('#rent-modes button').forEach(b =>
+    b.classList.toggle('actif', b.dataset.mode === mode));
+  if (chemin) { ouvrirRent(chemin); return; }
+  dessinerRent();
+}
+
+document.querySelectorAll('#rent-modes button').forEach(b => {
+  b.onclick = () => basculerMode(b.dataset.mode);
+});
+document.querySelectorAll('#rent-niveaux button').forEach(b => {
+  b.onclick = () => {
+    plat.niveau = b.dataset.niveau;
+    // une colonne absente du nouveau niveau ne peut plus trier
+    if (!colonnesNiveau().some(k => k.id === plat.tri)) plat.tri = null;
+    sauverRent();
+    dessinerPlat();
+  };
+});
+document.getElementById('rent-export-vue').onclick = exporterVue;
+document.body.classList.toggle('mode-plat', vueRent.mode === 'tableau');
+document.body.classList.toggle('mode-graph', vueRent.mode === 'graphiques');
+document.querySelectorAll('#rent-modes button').forEach(b =>
+  b.classList.toggle('actif', b.dataset.mode === (vueRent.mode || 'arbre')));
+
+// ------------------------------------------------------------- graphiques
+// Quatre lectures du meme arbre, chacune repondant a une question :
+//   - quel cluster gagne, lequel perd           barres divergentes (ROI)
+//   - d'ou vient le resultat                    CA et PA cote a cote
+//   - quels hyperviseurs peuvent encore prendre RAM allouee, seuils 85/100 %
+//   - de qui depend le chiffre d'affaires       CA par client
+// Les montants sont ceux de l'API, rien n'est recalcule. Le mode Tableau
+// reste la vue chiffree complete : un graphique n'est jamais le seul acces a
+// une valeur.
+const VIZ = { barre: 16, ligne: 28, haut: 20, bas: 28, droite: 16 };
+
+const euroCourt = v => {
+  const a = Math.abs(v);
+  const t = a >= 1000
+    ? (a / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 1 }) + ' k€'
+    : a.toLocaleString('fr-FR', { maximumFractionDigits: 0 }) + ' €';
+  return (v < 0 ? '−' : '') + t;
+};
+
+// graduations « rondes » : 1, 2 ou 5 fois une puissance de dix
+function graduations(min, max, n) {
+  const brut = (max - min) / Math.max(1, n);
+  const p = Math.pow(10, Math.floor(Math.log10(brut || 1)));
+  const pas = [1, 2, 5, 10].map(m => m * p).find(x => x >= brut) || brut;
+  const out = [];
+  for (let v = Math.ceil(min / pas) * pas; v <= max + 1e-9; v += pas) {
+    out.push(Math.abs(v) < 1e-9 ? 0 : v);
+  }
+  return out;
+}
+
+// Barre horizontale : extremite de donnee arrondie (4 px), carree a la base.
+function barreH(x0, x1, y, h) {
+  const r = Math.min(4, Math.abs(x1 - x0), h / 2);
+  if (x1 >= x0) {
+    return 'M' + x0 + ',' + y + 'H' + (x1 - r) + 'A' + r + ',' + r + ' 0 0 1 '
+      + x1 + ',' + (y + r) + 'V' + (y + h - r) + 'A' + r + ',' + r + ' 0 0 1 '
+      + (x1 - r) + ',' + (y + h) + 'H' + x0 + 'Z';
+  }
+  return 'M' + x0 + ',' + y + 'H' + (x1 + r) + 'A' + r + ',' + r + ' 0 0 0 '
+    + x1 + ',' + (y + r) + 'V' + (y + h - r) + 'A' + r + ',' + r + ' 0 0 0 '
+    + (x1 + r) + ',' + (y + h) + 'H' + x0 + 'Z';
+}
+
+// --- bulle de survol, partagee par les quatre graphiques
+const bulle = document.getElementById('viz-bulle');
+function montrerBulle(ev, titre, lignes) {
+  bulle.replaceChildren(el('b', { textContent: titre }),
+    ...lignes.map(([k, v]) => el('div', null, el('span', { textContent: k }),
+                                 el('span', { textContent: v }))));
+  bulle.hidden = false;
+  const m = 14, r = bulle.getBoundingClientRect();
+  let x = ev.clientX + m, y = ev.clientY + m;
+  if (x + r.width > innerWidth - 8) x = ev.clientX - r.width - m;
+  if (y + r.height > innerHeight - 8) y = ev.clientY - r.height - m;
+  bulle.style.left = Math.max(8, x) + 'px';
+  bulle.style.top = Math.max(8, y) + 'px';
+}
+function cacherBulle() { bulle.hidden = true; }
+
+// Ossature commune : un SVG a la largeur du conteneur, une colonne de noms a
+// gauche dimensionnee sur le plus long, l'axe des valeurs en bas.
+function cadreBarres(zone, rangs, opts) {
+  const largeur = Math.max(320, zone.clientWidth);
+  const mesure = svgEl('text', { class: 'viz-nom' });
+  const sonde = svgEl('svg', { width: 0, height: 0 });
+  sonde.appendChild(mesure);
+  zone.appendChild(sonde);
+  let gauche = 60;
+  for (const r of rangs) {
+    mesure.textContent = r.nom;
+    gauche = Math.max(gauche, mesure.getComputedTextLength() + 14);
+  }
+  sonde.remove();
+  gauche = Math.min(gauche, largeur * 0.38);
+  const hauteur = VIZ.haut + rangs.length * VIZ.ligne + VIZ.bas;
+  const svg = svgEl('svg', { width: largeur, height: hauteur, role: 'img',
+                             'aria-label': opts.resume });
+  const [min, max] = opts.domaine;
+  const x0 = gauche + (opts.margeLabel || 0);
+  const x1 = largeur - VIZ.droite - (opts.margeLabel || 0);
+  const x = v => x0 + (v - min) / ((max - min) || 1) * (x1 - x0);
+  // grille verticale, en retrait ; la ligne de base porte l'axe
+  const g = svgEl('g', { class: 'viz-grille' });
+  for (const t of graduations(min, max, Math.max(3, Math.floor((x1 - x0) / 70)))) {
+    g.appendChild(svgEl('line', { x1: x(t), x2: x(t), y1: VIZ.haut - 4,
+      y2: hauteur - VIZ.bas, class: t === 0 ? 'viz-base' : '' }));
+    g.appendChild(svgEl('text', { x: x(t), y: hauteur - VIZ.bas + 16,
+      class: 'viz-axe', 'text-anchor': 'middle' }, opts.format(t)));
+  }
+  svg.appendChild(g);
+  zone.appendChild(svg);
+  return { svg, x, gauche, largeur, hauteur,
+           y: i => VIZ.haut + i * VIZ.ligne };
+}
+
+// Une rangee : le nom, une zone de survol plus large que la barre, et ce que
+// dessine l'appelant. Survoler eclaircit les autres rangees.
+function rangee(cadre, i, nom, bulleFn, clic) {
+  const g = svgEl('g', { class: 'viz-rang' + (clic ? ' cliquable' : '') });
+  const y = cadre.y(i);
+  g.appendChild(svgEl('rect', { x: 0, y, width: cadre.largeur,
+    height: VIZ.ligne, class: 'viz-cible' }));
+  g.appendChild(svgEl('text', { x: cadre.gauche - 10, y: y + VIZ.ligne / 2 + 4,
+    class: 'viz-nom', 'text-anchor': 'end' }, nom));
+  g.addEventListener('mousemove', ev => montrerBulle(ev, ...bulleFn()));
+  g.addEventListener('mouseleave', cacherBulle);
+  if (clic) g.addEventListener('click', () => { cacherBulle(); clic(); });
+  cadre.svg.appendChild(g);
+  return { g, y: y + (VIZ.ligne - VIZ.barre) / 2 };
+}
+
+function libelleGroupe(c) {
+  return c.infos.seul ? c.nom.split('.')[0] + ' (seul)' : c.nom;
+}
+
+// Chaque figure a une seule source : rangs(), filtres appliques. Le dessin,
+// le tableau et le CSV en sont trois lectures, ils ne peuvent donc pas se
+// contredire. colonnes suit le format de COLONNES_PLAT (val, num, euro...).
+const FIGURES = [
+  {
+    id: 'viz-roi', fichier: 'resultat-par-cluster',
+    rangs: () => lignesFiltrees('cluster')
+      .map(r => ({ c: r.c, nom: libelleGroupe(r.c) }))
+      .sort((a, b) => b.c.roi - a.c.roi),
+    colonnes: [
+      { titre: 'Cluster', val: r => r.nom },
+      { titre: 'Serveurs', num: true, dec: 0,
+        val: r => r.c.enfants.filter(e => e.type === 'serveur').length },
+      { titre: 'PA / mois', num: true, euro: true, somme: true, val: r => r.c.pa },
+      { titre: 'CA / mois', num: true, euro: true, somme: true, val: r => r.c.pv },
+      { titre: 'ROI / mois', num: true, euro: true, somme: true, signe: true,
+        val: r => r.c.roi },
+      { titre: 'Marge %', num: true, dec: 1, val: r => marge(r.c) },
+    ],
+    dessiner: dessinRoi,
+  },
+  {
+    id: 'viz-capa', fichier: 'ca-et-pa-par-cluster',
+    rangs: () => lignesFiltrees('cluster')
+      .map(r => ({ c: r.c, nom: libelleGroupe(r.c) }))
+      .sort((a, b) => b.c.pv - a.c.pv),
+    colonnes: [
+      { titre: 'Cluster', val: r => r.nom },
+      { titre: 'CA / mois', num: true, euro: true, somme: true, val: r => r.c.pv },
+      { titre: 'PA / mois', num: true, euro: true, somme: true, val: r => r.c.pa },
+      { titre: 'ROI / mois', num: true, euro: true, somme: true, signe: true,
+        val: r => r.c.roi },
+    ],
+    dessiner: dessinCaPa,
+  },
+  {
+    id: 'viz-clients', fichier: 'ca-par-client',
+    rangs: rangsClients,
+    colonnes: [
+      { titre: 'Client', val: r => r.nom },
+      { titre: 'CA / mois', num: true, euro: true, somme: true, val: r => r.v },
+      { titre: 'Part du CA %', num: true, dec: 1, val: r => r.part },
+    ],
+    dessiner: dessinClients,
+  },
+  {
+    id: 'viz-ram', fichier: 'ram-par-serveur',
+    rangs: () => lignesFiltrees('serveur')
+      .filter(r => r.c.capacite && r.c.capacite.ram_pct !== undefined)
+      .map(r => ({ c: r.c, groupe: r.groupe, nom: r.c.nom.split('.')[0]
+        + (r.c.infos.noeud ? ' · ' + r.c.infos.noeud : '') }))
+      .sort((a, b) => b.c.capacite.ram_pct - a.c.capacite.ram_pct),
+    colonnes: [
+      { titre: 'Serveur', val: r => r.c.nom },
+      { titre: 'Nœud', val: r => r.c.infos.noeud },
+      { titre: 'Cluster', val: r => r.groupe },
+      { titre: 'RAM allouée (Go)', num: true, dec: 0,
+        val: r => r.c.capacite.alloue.ram_mb / 1024 },
+      { titre: 'RAM physique (Go)', num: true, dec: 0,
+        val: r => (r.c.capacite.physique.ram_mb || 0) / 1024 },
+      { titre: 'RAM allouée %', num: true, dec: 1, val: r => r.c.capacite.ram_pct },
+      { titre: 'RAM libre (Go)', num: true, dec: 0,
+        val: r => r.c.capacite.ram_libre_mb / 1024 },
+      { titre: 'vCPU / thread', num: true, dec: 2, val: r => r.c.capacite.vcpu_ratio },
+      { titre: 'État', val: r => r.c.capacite.ram_pct > 100 ? '⚠ surréservée'
+          : r.c.capacite.ram_pct >= 85 ? '▲ tendue' : 'ok' },
+    ],
+    dessiner: dessinRam,
+  },
+];
+
+// Le CA par client se lit sur les cartes qui le portent : contrats des VM,
+// elements declares. Seules les cartes retenues par les filtres comptent ;
+// les contrats hors parc, seulement quand aucun filtre de parc n'est pose.
+function rangsClients() {
+  const par = new Map();
+  const ajouter = (client, v) => {
+    const k = client || 'sans client';
+    par.set(k, (par.get(k) || 0) + Number(v || 0));
+  };
+  for (const r of lignesFiltrees('vm')) {
+    // une correction du PV remplace les contrats : on suit la valeur retenue
+    if (r.c.corrections.prix_vente) ajouter('correction manuelle', r.c.pv_propre);
+    else for (const v of contrats(r.c)) {
+      if (!selection.clients.size || selection.clients.has(v.client)) {
+        ajouter(v.client, v.vente_mois);
+      }
+    }
+  }
+  for (const r of lignesFiltrees('element')) {
+    if (!selection.clients.size || selection.clients.has(r.c.infos.client)) {
+      ajouter(r.c.infos.client, r.c.pv_propre);
+    }
+  }
+  if (!filtreDeParc()) {
+    for (const o of commerce.orphelins) {
+      if (!selection.clients.size || selection.clients.has(o.client)) {
+        ajouter(o.client, o.pv);
+      }
+    }
+  }
+  let rangs = [...par.entries()].map(([nom, v]) => ({ nom, v }))
+    .filter(r => r.v > 0).sort((a, b) => b.v - a.v);
+  const total = rangs.reduce((t, r) => t + r.v, 0);
+  rangs.forEach(r => { r.part = total ? Math.round(1000 * r.v / total) / 10 : 0; });
+  return rangs;
+}
+
+function dessinRoi(zone, rangs) {
+  const min = Math.min(0, ...rangs.map(r => r.c.roi));
+  const max = Math.max(0, ...rangs.map(r => r.c.roi));
+  const cadre = cadreBarres(zone, rangs, {
+    domaine: [min, max], format: euroCourt, margeLabel: 64,
+    resume: 'ROI mensuel par cluster, de ' + euroCourt(max) + ' à ' + euroCourt(min),
+  });
+  rangs.forEach((r, i) => {
+    const c = r.c;
+    const { g, y } = rangee(cadre, i, r.nom, () => [r.nom, [
+      ['PA', euro(c.pa)], ['CA', euro(c.pv)], ['ROI', signe(c.roi)],
+      ['Marge', c.pv ? Math.round(100 * c.roi / c.pv) + ' %' : '—'],
+      ['Serveurs', String(c.enfants.filter(e => e.type === 'serveur').length)],
+    ]], () => basculerMode('arbre', [cleIndex(c)]));
+    const xa = cadre.x(0), xb = cadre.x(c.roi);
+    g.appendChild(svgEl('path', { d: barreH(xa, xb, y, VIZ.barre),
+      class: c.roi < 0 ? 'viz-perte' : 'viz-gain' }));
+    // la valeur, signee, en encre de texte : le signe dit le sens sans
+    // dependre de la couleur
+    g.appendChild(svgEl('text', { x: xb + (c.roi < 0 ? -6 : 6),
+      y: y + VIZ.barre / 2 + 4, class: 'viz-valeur',
+      'text-anchor': c.roi < 0 ? 'end' : 'start' },
+      (c.roi > 0 ? '+' : '') + euroCourt(c.roi)));
+  });
+}
+
+function dessinCaPa(zone, rangs) {
+  const max = Math.max(1, ...rangs.flatMap(r => [r.c.pv, r.c.pa]));
+  zone.appendChild(el('div', { className: 'viz-legende' },
+    el('span', null, el('i', { className: 'viz-ca' }), 'CA / mois'),
+    el('span', null, el('i', { className: 'viz-pa' }), 'PA / mois')));
+  const cadre = cadreBarres(zone, rangs, {
+    domaine: [0, max], format: euroCourt,
+    resume: 'Chiffre d’affaires et prix d’achat mensuels par cluster',
+  });
+  const h = (VIZ.barre - 2) / 2;   // deux barres et l'interstice de 2 px
+  rangs.forEach((r, i) => {
+    const c = r.c;
+    const { g, y } = rangee(cadre, i, r.nom, () => [r.nom, [
+      ['CA', euro(c.pv)], ['PA', euro(c.pa)], ['ROI', signe(c.roi)],
+    ]], () => basculerMode('arbre', [cleIndex(c)]));
+    g.appendChild(svgEl('path', { d: barreH(cadre.x(0), cadre.x(c.pv), y, h),
+                                  class: 'viz-ca' }));
+    g.appendChild(svgEl('path', { d: barreH(cadre.x(0), cadre.x(c.pa), y + h + 2, h),
+                                  class: 'viz-pa' }));
+  });
+}
+
+function dessinRam(zone, rangs) {
+  const max = Math.max(110, ...rangs.map(r => r.c.capacite.ram_pct));
+  const cadre = cadreBarres(zone, rangs, {
+    domaine: [0, max], format: v => v + ' %', margeLabel: 0,
+    resume: 'RAM allouée par serveur, en pourcentage de la RAM physique',
+  });
+  // seuils nommes, pas seulement colores ; les deux etiquettes de part et
+  // d'autre de leur ligne, sinon elles se chevauchent au-dela de 150 %
+  for (const [v, t, ancre, dx] of [[85, '▲ 85 %', 'end', -4],
+                                   [100, '⚠ 100 %', 'start', 4]]) {
+    cadre.svg.appendChild(svgEl('line', { x1: cadre.x(v), x2: cadre.x(v),
+      y1: VIZ.haut - 4, y2: cadre.hauteur - VIZ.bas, class: 'viz-seuil' }));
+    cadre.svg.appendChild(svgEl('text', { x: cadre.x(v) + dx, y: VIZ.haut - 8,
+      'text-anchor': ancre, class: 'viz-axe' }, t));
+  }
+  rangs.forEach((r, i) => {
+    const cap = r.c.capacite, p = cap.ram_pct;
+    const trop = p > 100, tendu = p >= 85;
+    const { g, y } = rangee(cadre, i, r.nom, () => [r.c.nom, [
+      ['Cluster', r.groupe],
+      ['RAM allouée', go(cap.alloue.ram_mb) + ' sur ' + go(cap.physique.ram_mb)],
+      ['Taux', pct(p) + (trop ? ' — surréservée' : tendu ? ' — tendue' : '')],
+      ['RAM libre', go(cap.ram_libre_mb)],
+      ['vCPU', cap.alloue.vcpu + ' sur ' + (cap.physique.vcpu || '?') + ' threads'],
+    ]], () => basculerMode('arbre', commerce.index.get(cleIndex(r.c)).chemin));
+    g.appendChild(svgEl('path', { d: barreH(cadre.x(0), cadre.x(p), y, VIZ.barre),
+      class: trop ? 'viz-critique' : tendu ? 'viz-tendu' : 'viz-ram' }));
+    const fin = cadre.x(p);
+    const dedans = fin - cadre.x(0) > 70;
+    // l'etat porte un pictogramme en plus de sa couleur : ▲ tendu, ⚠ surreserve
+    g.appendChild(svgEl('text', { x: dedans ? fin - 6 : fin + 6,
+      y: y + VIZ.barre / 2 + 4, 'text-anchor': dedans ? 'end' : 'start',
+      class: 'viz-valeur' + (dedans ? (trop || !tendu ? ' dedans' : ' dedans-sombre') : '') },
+      (trop ? '⚠ ' : tendu ? '▲ ' : '') + Math.round(p) + ' %'));
+  });
+}
+
+function dessinClients(zone, rangs) {
+  // au-dela de dix, la longue traine se replie en « Autres » — sur le dessin
+  // seulement : le tableau et le CSV gardent chaque client
+  if (rangs.length > 10) {
+    const reste = rangs.slice(9);
+    rangs = rangs.slice(0, 9).concat([{ nom: 'Autres (' + reste.length + ')',
+      v: reste.reduce((t, r) => t + r.v, 0),
+      part: Math.round(10 * reste.reduce((t, r) => t + r.part, 0)) / 10 }]);
+  }
+  const max = Math.max(...rangs.map(r => r.v));
+  const cadre = cadreBarres(zone, rangs, {
+    domaine: [0, max], format: euroCourt, margeLabel: 0,
+    resume: 'Chiffre d’affaires mensuel par client',
+  });
+  rangs.forEach((r, i) => {
+    const { g, y } = rangee(cadre, i, r.nom, () => [r.nom, [
+      ['CA / mois', euro(r.v)], ['Part du CA', r.part.toLocaleString('fr-FR') + ' %'],
+    ]]);
+    const fin = cadre.x(r.v);
+    g.appendChild(svgEl('path', { d: barreH(cadre.x(0), fin, y, VIZ.barre),
+                                  class: 'viz-ca' }));
+    const dedans = fin - cadre.x(0) > 90;
+    g.appendChild(svgEl('text', { x: dedans ? fin - 6 : fin + 6,
+      y: y + VIZ.barre / 2 + 4, 'text-anchor': dedans ? 'end' : 'start',
+      class: dedans ? 'viz-valeur dedans' : 'viz-valeur' },
+      r.part.toLocaleString('fr-FR') + ' %'));
+  });
+}
+
+function graphVide(zone) {
+  zone.appendChild(el('p', { className: 'lecture',
+    textContent: filtreRentActif() ? 'Rien ne correspond aux filtres.'
+                               : 'Rien à représenter.' }));
+}
+
+// Une figure en tableau : memes rangs, memes colonnes que le CSV, et un
+// total pour les montants.
+function tableFigure(zone, f, rangs) {
+  const t = el('table', { className: 'arbre plat mini' });
+  t.appendChild(el('thead', null, el('tr', null, ...f.colonnes.map(k =>
+    el('th', { className: k.num ? 'num' : '', scope: 'col', textContent: k.titre })))));
+  const corps = el('tbody');
+  for (const r of rangs) {
+    corps.appendChild(el('tr', null, ...f.colonnes.map(k => {
+      const v = k.val(r);
+      return el('td', { textContent: formatCellule(k, v),
+        className: (k.num ? 'num' : '') + (k.signe ? ' marge ' + classeMarge(v) : '') });
+    })));
+  }
+  t.appendChild(corps);
+  if (rangs.length > 1 && f.colonnes.some(k => k.somme)) {
+    t.appendChild(el('tfoot', null, el('tr', null, ...f.colonnes.map((k, i) => {
+      if (i === 0) return el('th', { scope: 'row', textContent: 'Total' });
+      if (!k.somme) return el('td');
+      const s = rangs.reduce((x, r) => x + Number(k.val(r) || 0), 0);
+      return el('td', { textContent: formatCellule(k, s),
+        className: 'num' + (k.signe ? ' marge ' + classeMarge(s) : '') });
+    }))));
+  }
+  zone.appendChild(el('div', { className: 'table-defile mini' }, t));
+}
+
+function dessinerGraphes() {
+  for (const f of FIGURES) {
+    const zone = document.getElementById(f.id);
+    zone.replaceChildren();
+    const rangs = f.rangs();
+    const enTable = vueRent.figures[f.id] === 'tableau';
+    const fig = zone.closest('figure');
+    fig.querySelectorAll('.fig-modes button').forEach(b =>
+      b.classList.toggle('actif', (b.dataset.vue === 'tableau') === enTable));
+    if (!rangs.length) { graphVide(zone); continue; }
+    if (enTable) tableFigure(zone, f, rangs);
+    else f.dessiner(zone, rangs);
+  }
+}
+
+// Les outils de chaque figure : graphique ou tableau, et l'export CSV de ce
+// que la figure montre — filtres compris.
+for (const f of FIGURES) {
+  const cap = document.getElementById(f.id).closest('figure').querySelector('figcaption');
+  const modes = el('div', { className: 'segment fig-modes', role: 'group' },
+    el('button', { textContent: 'Graphique', title: 'Afficher en graphique' }),
+    el('button', { textContent: 'Tableau', title: 'Afficher les valeurs en tableau' }));
+  modes.children[0].dataset.vue = 'graphique';
+  modes.children[1].dataset.vue = 'tableau';
+  for (const b of modes.children) {
+    b.onclick = () => {
+      vueRent.figures[f.id] = b.dataset.vue;
+      sauverRent();
+      cacherBulle();
+      dessinerGraphes();
+    };
+  }
+  const csv = el('button', { textContent: 'CSV', title: 'Exporter cette figure en CSV',
+    onclick: () => {
+      const rangs = f.rangs();
+      telechargerCsv('rentabilite-' + f.fichier, f.colonnes, rangs);
+      flash(rangs.length + ' ligne' + (rangs.length > 1 ? 's' : '') + ' exportée'
+            + (rangs.length > 1 ? 's.' : '.'));
+    } });
+  cap.prepend(el('div', { className: 'fig-outils' }, modes, csv));
+}
+
+// ------------------------------------------------------ filtres communs
+// Un seul jeu de filtres pour les trois presentations : l'arbre garde une
+// carte si elle ou l'un de ses descendants passe, le tableau et les
+// graphiques ne gardent que les cartes qui passent. Un filtre choisit des
+// cartes ; il ne recalcule pas leurs montants, qui restent ceux de l'API.
+const selection = { clusters: new Set(), datacenters: new Set(),
+                    clients: new Set(), genres: new Set() };
+const CRITERES = [['clusters', 'Clusters'], ['datacenters', 'Datacenters'],
+                  ['clients', 'Clients'], ['genres', 'Genres d’élément']];
+let cacheLignes = { arbre: null, lignes: [], parCarte: new Map() };
+
+// L'arbre aplati, chaque carte avec son contexte : groupe, serveur, parent,
+// datacenters, et les clients et genres qu'elle porte ou que portent ses
+// descendants — c'est ce qui permet de garder un cluster parce qu'un site
+// d'un client choisi y tourne.
+function aplatir() {
+  if (cacheLignes.arbre === commerce.arbre) return cacheLignes.lignes;
+  const out = [];
+  let ordre = 0;
+  const visiter = (c, ctx, chemin) => {
+    const ici = chemin.concat([cleIndex(c)]);
+    const r = { c, chemin: ici, ordre: ordre++, cluster: ctx.cluster,
+                groupe: ctx.groupe, serveur: ctx.serveur, parent: ctx.parent,
+                dcs: ctx.dcs, clients: new Set(), genres: new Set() };
+    if (c.type === 'cluster') {
+      r.cluster = c.infos.seul ? '' : c.nom;
+      r.groupe = libelleGroupe(c);
+      r.dcs = new Set(c.infos.datacenters || []);
+    }
+    if (c.type === 'serveur' && c.infos.datacenter) r.dcs = new Set([c.infos.datacenter]);
+    if (c.type === 'vm') contrats(c).forEach(v => v.client && r.clients.add(v.client));
+    if (c.type === 'element') {
+      if (c.infos.client) r.clients.add(c.infos.client);
+      if (c.infos.genre) r.genres.add(c.infos.genre);
+    }
+    r.nbVm = compterVm(c);
+    out.push(r);
+    const sous = { cluster: r.cluster, groupe: r.groupe, dcs: r.dcs,
+                   serveur: c.type === 'serveur' ? c.nom : ctx.serveur,
+                   parent: c.nom };
+    for (const e of c.enfants) {
+      const re = visiter(e, sous, ici);
+      re.clients.forEach(x => r.clients.add(x));
+      re.genres.forEach(x => r.genres.add(x));
+    }
+    return r;
+  };
+  commerce.arbre.forEach(c => visiter(c, { cluster: '', groupe: '', serveur: '',
+                                           parent: '', dcs: new Set() }, []));
+  cacheLignes = { arbre: commerce.arbre, lignes: out,
+                  parCarte: new Map(out.map(r => [r.c, r])) };
+  return out;
+}
+
+function compterVm(c) {
+  return c.enfants.reduce((n, e) => n + (e.type === 'vm' ? 1 : 0) + compterVm(e), 0);
+}
+
+const croise = (ens, choix) => [...ens].some(x => choix.has(x));
+
+function correspondRent(r) {
+  if (selection.clusters.size && !selection.clusters.has(r.groupe)) return false;
+  if (selection.datacenters.size && !croise(r.dcs, selection.datacenters)) return false;
+  if (selection.clients.size && !croise(r.clients, selection.clients)) return false;
+  if (selection.genres.size && !croise(r.genres, selection.genres)) return false;
+  const f = vueRent.filtre;
+  if (f && ![r.c.nom, r.cluster, r.serveur, r.parent,
+             r.c.infos.client, r.c.infos.contrat,
+             ...contrats(r.c).map(v => v.contrat + ' ' + (v.client || ''))]
+      .some(x => String(x || '').toLowerCase().includes(f))) return false;
+  if (vueRent.perte && !(r.c.roi < 0)) return false;
+  if (vueRent.alertes && !r.c.alertes.length) return false;
+  return true;
+}
+
+const filtreDeParc = () => selection.clusters.size || selection.datacenters.size
+  || selection.genres.size || vueRent.filtre || vueRent.perte || vueRent.alertes;
+const filtreRentActif = () => filtreDeParc() || selection.clients.size;
+
+function lignesFiltrees(type) {
+  return aplatir().filter(r => r.c.type === type && correspondRent(r));
+}
+
+// Arbre : une carte reste si elle passe, ou si un descendant passe — on ne
+// cache jamais le chemin vers un resultat.
+function garde(c) {
+  aplatir();
+  const memo = new Map();
+  const test = x => {
+    if (memo.has(x)) return memo.get(x);
+    const r = correspondRent(cacheLignes.parCarte.get(x)) || x.enfants.some(test);
+    memo.set(x, r);
+    return r;
+  };
+  return test(c);
+}
+
+function valeursCritere(k) {
+  const v = new Set();
+  for (const r of aplatir()) {
+    if (k === 'clusters' && r.c.type === 'cluster') v.add(r.groupe);
+    if (k === 'datacenters') r.dcs.forEach(x => v.add(x));
+    if (k === 'clients') r.clients.forEach(x => v.add(x));
+    if (k === 'genres') r.genres.forEach(x => v.add(x));
+  }
+  // une valeur choisie reste affichee meme si elle a disparu du parc : sinon
+  // on ne pourrait plus la decocher
+  selection[k].forEach(x => v.add(x));
+  return [...v].sort((a, b) => a.localeCompare(b, 'fr', { numeric: true }));
+}
+
+function construireFiltresRent() {
+  const zone = document.getElementById('rent-filtres');
+  zone.replaceChildren();
+  for (const [k, titre] of CRITERES) {
+    const valeurs = valeursCritere(k);
+    if (!valeurs.length) continue;
+    const grp = el('div', { className: 'groupe' }, el('label', { textContent: titre }));
+    for (const v of valeurs) {
+      const p = el('button', { className: 'puce' + (selection[k].has(v) ? ' choisi' : ''),
+        textContent: v, ariaPressed: String(selection[k].has(v)),
+        onclick: () => {
+          if (selection[k].has(v)) selection[k].delete(v); else selection[k].add(v);
+          apresFiltre();
+        } });
+      grp.appendChild(p);
+    }
+    zone.appendChild(grp);
+  }
+  zone.appendChild(el('button', { textContent: 'Tout effacer', className: 'effacer',
+    onclick: () => { effacerFiltres(); apresFiltre(); } }));
+}
+
+function effacerFiltres() {
+  for (const k in selection) selection[k].clear();
+  vueRent.filtre = ''; vueRent.perte = false; vueRent.alertes = false;
+  document.getElementById('rent-recherche').value = '';
+  document.getElementById('rent-perte').checked = false;
+  document.getElementById('rent-alertes').checked = false;
+}
+
+function majBoutonFiltres() {
+  const n = Object.values(selection).reduce((t, s) => t + s.size, 0);
+  const b = document.getElementById('rent-btn-filtres');
+  b.textContent = n ? 'Filtres (' + n + ')' : 'Filtres';
+  b.classList.toggle('actif', !document.getElementById('rent-filtres').hidden || n > 0);
+}
+
+function apresFiltre() {
+  vueRent.cible = null;
+  if (!document.getElementById('rent-filtres').hidden) construireFiltresRent();
+  majBoutonFiltres();
+  dessinerRent();
+}
+
+document.getElementById('rent-btn-filtres').onclick = () => {
+  const zone = document.getElementById('rent-filtres');
+  zone.hidden = !zone.hidden;
+  if (!zone.hidden) construireFiltresRent();
+  majBoutonFiltres();
+};
+
+// ------------------------------------------------------ vues enregistrees
+// Une vue, c'est un nom et l'etat qui la rouvre : filtres, presentation,
+// niveau et tri du tableau. Elles sont en base, partagees par defaut : la
+// vue « Commercial » de l'un est celle de toute l'equipe. La vue d'ensemble,
+// elle, n'est pas enregistree : c'est l'etat neutre, en graphiques.
+const VUE_BASE = { id: '', nom: 'Vue d’ensemble', definition: { mode: 'graphiques' },
+                   modifiable: false };
+const vues = { liste: [], courante: VUE_BASE, dispo: false };
+
+// L'etat courant, sous la forme exacte que le serveur normalise : memes
+// cles, listes triees. C'est ce qui permet de dire « modifiee » sans faux
+// positif.
+function etatCourant() {
+  const d = { mode: vueRent.mode };
+  if (vueRent.mode === 'tableau') {
+    d.niveau = plat.niveau;
+    if (plat.tri) { d.tri = plat.tri; d.sens = plat.sens; }
+  }
+  const texte = document.getElementById('rent-recherche').value.trim();
+  if (texte) d.texte = texte;
+  if (vueRent.perte) d.perte = true;
+  if (vueRent.alertes) d.alertes = true;
+  for (const [k] of CRITERES) {
+    if (selection[k].size) d[k] = [...selection[k]].sort();
+  }
+  return d;
+}
+
+function canon(d) {
+  const o = {};
+  for (const k of Object.keys(d || {}).sort()) {
+    o[k] = Array.isArray(d[k]) ? [...d[k]].sort() : d[k];
+  }
+  // un niveau ou un tri hors du mode tableau n'a pas d'effet
+  if (o.mode !== 'tableau') { delete o.niveau; delete o.tri; delete o.sens; }
+  return JSON.stringify(o);
+}
+
+function appliquerDefinition(d) {
+  d = d || {};
+  for (const [k] of CRITERES) selection[k] = new Set(d[k] || []);
+  document.getElementById('rent-recherche').value = d.texte || '';
+  vueRent.filtre = (d.texte || '').toLowerCase();
+  vueRent.perte = !!d.perte;
+  vueRent.alertes = !!d.alertes;
+  document.getElementById('rent-perte').checked = vueRent.perte;
+  document.getElementById('rent-alertes').checked = vueRent.alertes;
+  plat.niveau = d.niveau || 'serveur';
+  plat.tri = d.tri || null;
+  plat.sens = d.sens === -1 ? -1 : 1;
+  vueRent.cible = null;
+  if (!document.getElementById('rent-filtres').hidden) construireFiltresRent();
+  majBoutonFiltres();
+  basculerMode(d.mode || 'graphiques');
+}
+
+function majModifiee() {
+  const modifiee = canon(etatCourant()) !== canon(vues.courante.definition);
+  document.getElementById('vue-modifiee').hidden = !modifiee;
+}
+
+function remplirSelectVues() {
+  const s = document.getElementById('rent-vue');
+  s.replaceChildren(el('option', { value: '', textContent: VUE_BASE.nom }));
+  const miennes = vues.liste.filter(v => v.modifiable);
+  const autres = vues.liste.filter(v => !v.modifiable);
+  const groupe = (titre, lot) => {
+    if (!lot.length) return;
+    const g = el('optgroup', { label: titre });
+    for (const v of lot) {
+      g.appendChild(el('option', { value: String(v.id),
+        textContent: v.nom + (v.partagee ? '' : ' (privée)')
+          + (v.modifiable ? '' : ' — ' + v.cree_par) }));
+    }
+    s.appendChild(g);
+  };
+  groupe('Mes vues', miennes);
+  groupe('Vues de l’équipe', autres);
+  s.value = String(vues.courante.id);
+  const c = vues.courante;
+  document.getElementById('vue-supprimer').hidden = !c.modifiable;
+  document.getElementById('vue-auteur').textContent = c.id === ''
+    ? '' : c.modifiable ? (c.partagee ? 'partagée avec l’équipe' : 'visible de toi seul')
+                        : 'par ' + c.cree_par + ', lecture seule';
+}
+
+async function chargerVues(idVoulu) {
+  try {
+    const r = await fetch('/api/vues', { headers: { Accept: 'application/json' } });
+    if (!r.ok) throw new Error('http ' + r.status);
+    vues.liste = (await r.json()).vues || [];
+    vues.dispo = true;
+  } catch (e) {
+    vues.liste = [];
+    vues.dispo = false;
+  }
+  document.getElementById('rent-vues').hidden = !vues.dispo;
+  const voulue = vues.liste.find(v => String(v.id) === String(idVoulu));
+  vues.courante = voulue || VUE_BASE;
+  remplirSelectVues();
+  appliquerDefinition(vues.courante.definition);
+}
+
+document.getElementById('rent-vue').onchange = ev => {
+  vues.courante = vues.liste.find(v => String(v.id) === ev.target.value) || VUE_BASE;
+  sauverRent();
+  remplirSelectVues();
+  appliquerDefinition(vues.courante.definition);
+};
+
+document.getElementById('vue-enregistrer').onclick = () => {
+  const c = vues.courante;
+  const corps = ouvrirTiroir('Enregistrer la vue',
+    'filtres, présentation, niveau et tri du tableau');
+  const f = el('form', { autocomplete: 'off', className: 'saisie' });
+  const nom = champ(f, 'Nom', { type: 'text', required: true, maxLength: 80,
+    value: c.modifiable ? c.nom : '', placeholder: 'ex. Commercial, Compta mensuelle' });
+  const part = el('input', { type: 'checkbox', checked: c.modifiable ? c.partagee : true });
+  f.appendChild(el('label', { className: 'case' }, part,
+    ' partagée avec l’équipe (sinon visible de toi seul)'));
+  const resume = el('ul', { className: 'resume-vue' });
+  const d = etatCourant();
+  resume.appendChild(el('li', { textContent: 'Présentation : ' + d.mode
+    + (d.niveau ? ', niveau ' + d.niveau : '') + (d.tri ? ', tri ' + d.tri : '') }));
+  for (const [k, titre] of CRITERES) {
+    if (d[k]) resume.appendChild(el('li', { textContent: titre + ' : ' + d[k].join(', ') }));
+  }
+  if (d.texte) resume.appendChild(el('li', { textContent: 'Texte : ' + d.texte }));
+  if (d.perte) resume.appendChild(el('li', { textContent: 'À perte seulement' }));
+  if (d.alertes) resume.appendChild(el('li', { textContent: 'Avec alerte seulement' }));
+  f.appendChild(resume);
+  const envoyer = (id) => soumettre(f, async () => {
+    const rep = await poster('/api/vues', { id, nom: nom.value, partagee: part.checked,
+                                            definition: etatCourant() });
+    await chargerVues(rep.vue.id);
+  }, id ? 'Vue mise à jour.' : 'Vue enregistrée.');
+  const actions = el('div', { className: 'actions' });
+  if (c.modifiable) {
+    actions.appendChild(el('button', { type: 'submit',
+      textContent: 'Mettre à jour « ' + c.nom + ' »' }));
+    actions.appendChild(el('button', { type: 'button', textContent: 'Nouvelle vue',
+      onclick: () => { if (f.reportValidity()) envoyer(null); } }));
+    f.onsubmit = ev => { ev.preventDefault(); envoyer(c.id); };
+  } else {
+    actions.appendChild(el('button', { type: 'submit', textContent: 'Enregistrer' }));
+    f.onsubmit = ev => { ev.preventDefault(); envoyer(null); };
+  }
+  actions.appendChild(el('button', { type: 'button', textContent: 'Annuler',
+                                     onclick: fermerTiroir }));
+  f.appendChild(actions);
+  corps.appendChild(f);
+  nom.focus();
+};
+
+document.getElementById('vue-supprimer').onclick = async () => {
+  const c = vues.courante;
+  if (!c.modifiable || !confirm('Supprimer la vue « ' + c.nom + ' » ?')) return;
+  try {
+    await poster('/api/vues/retirer', { id: c.id });
+    flash('Vue supprimée.');
+    await chargerVues('');
+  } catch (e) {
+    flash(e.message);
+  }
+};
+
+// a la largeur du conteneur : on redessine quand la fenetre change
+let attenteViz = null;
+addEventListener('resize', () => {
+  if (!vueRent.actif || vueRent.mode !== 'graphiques') return;
+  clearTimeout(attenteViz);
+  attenteViz = setTimeout(dessinerGraphes, 120);
+});
+
+// --------------------------------------------------------------- saisies
+const tiroir = document.getElementById('tiroir');
+function fermerTiroir() { tiroir.classList.remove('visible'); }
+document.getElementById('tiroir-fermer').onclick = fermerTiroir;
+
+function ouvrirTiroir(titre, sous) {
+  document.getElementById('tiroir-titre').textContent = titre;
+  document.getElementById('tiroir-type').textContent = sous || '';
+  const corps = document.getElementById('tiroir-corps');
+  corps.replaceChildren();
+  tiroir.classList.add('visible');
+  return corps;
+}
+
+function champ(f, etiquette, attrs) {
+  const id = 'c-' + Math.random().toString(36).slice(2, 8);
+  const i = el(attrs.tag || 'input', Object.assign({ id }, attrs));
+  delete i.tag;
+  f.append(el('label', { textContent: etiquette, htmlFor: id }), i);
   return i;
 }
 
-function ouvrirFormulaire(hote, vm, existant) {
-  const ancien = hote.querySelector('form');
-  if (ancien) ancien.remove();
-  const ancienMsg = hote.querySelector('.msg');
-  if (ancienMsg) ancienMsg.remove();
-
-  const f = document.createElement('form');
-  f.autocomplete = 'off';
-
-  f.appendChild(Object.assign(document.createElement('label'),
-    { textContent: 'VM : ' + vm }));
-
-  const contrat = champ(f, 'Numéro de contrat', {
-    id: 'v-contrat', type: 'text', required: true, maxLength: 100,
-    value: existant ? existant.contrat : '',
-  });
-
-  const paire = document.createElement('div');
-  paire.className = 'paire';
-  const prix = Object.assign(document.createElement('input'), {
-    id: 'v-prix', type: 'number', step: '0.01', min: '0', required: true,
-    placeholder: 'Prix de vente',
-    value: existant ? existant.prix_vente : '',
-  });
-  const periode = document.createElement('select');
+function periode(f, valeur) {
+  const s = el('select');
   for (const p of ['mois', 'an']) {
-    periode.appendChild(Object.assign(document.createElement('option'),
-      { value: p, textContent: '/ ' + p,
-        selected: existant ? existant.periode === p : p === 'mois' }));
+    s.appendChild(el('option', { value: p, textContent: 'par ' + p,
+                                 selected: (valeur || 'mois') === p }));
   }
-  paire.append(prix, periode);
-  f.appendChild(Object.assign(document.createElement('label'),
-    { textContent: 'Prix de vente', htmlFor: 'v-prix' }));
-  f.appendChild(paire);
-
-  const client = champ(f, 'Client (facultatif)', {
-    id: 'v-client', type: 'text', maxLength: 190,
-    value: existant && existant.client ? existant.client : '',
-  });
-
-  const actions = document.createElement('div');
-  actions.className = 'actions';
-  const valider = Object.assign(document.createElement('button'),
-    { type: 'submit', textContent: 'Enregistrer' });
-  const annuler = Object.assign(document.createElement('button'),
-    { type: 'button', textContent: 'Annuler' });
-  annuler.onclick = () => { f.remove(); };
-  actions.append(valider, annuler);
-
-  if (existant) {
-    const resilier = Object.assign(document.createElement('button'),
-      { type: 'button', textContent: 'Résilier' });
-    resilier.onclick = () => envoyerResiliation(f, existant.contrat);
-    actions.appendChild(resilier);
-  }
-  f.appendChild(actions);
-
-  f.onsubmit = (ev) => {
-    ev.preventDefault();
-    envoyerVente(f, {
-      vm_name: vm,
-      contrat: contrat.value,
-      prix_vente: prix.value,
-      periode: periode.value,
-      client: client.value,
-    });
-  };
-
-  hote.appendChild(f);
-  contrat.focus();
+  f.append(el('label', { textContent: 'Période des prix' }), s);
+  return s;
 }
 
 function message(f, texte, ok) {
-  const p = f.parentElement.querySelector('.msg')
-         || f.parentElement.appendChild(document.createElement('p'));
+  const p = f.querySelector('.msg') || f.appendChild(el('p'));
   p.className = 'msg ' + (ok ? 'ok' : 'ko');
   p.textContent = texte;
 }
 
-async function envoyerVente(f, charge) {
+async function poster(url, charge) {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(charge),
+  });
+  if (r.status === 401) {
+    sessionExpiree();
+    throw new Error('session expirée : reconnecte-toi, la saisie n’a pas été enregistrée');
+  }
+  const rep = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(rep.erreur || ('refus (' + r.status + ')'));
+  return rep;
+}
+
+// envoie, recharge l'arbre, ferme le tiroir ; garde le formulaire ouvert et
+// dit pourquoi en cas de refus
+async function soumettre(f, travail, succes) {
   const boutons = f.querySelectorAll('button');
   boutons.forEach(b => { b.disabled = true; });
   try {
-    const r = await fetch('/api/commercial', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(charge),
-    });
-    const rep = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      message(f, rep.erreur || ('refus (' + r.status + ')'), false);
-      return;
-    }
-    f.remove();
+    await travail();
     await chargerCommerce();
-    const n = etat.selection ? parId.get(etat.selection) : null;
-    if (n) {
-      const z = document.getElementById('fiche-vente');
-      const p = document.createElement('p');
-      p.className = 'msg ok';
-      p.textContent = rep.cree ? 'Vente enregistrée.' : 'Contrat corrigé.';
-      z.appendChild(p);
-    }
+    fermerTiroir();
+    if (succes) flash(succes);
   } catch (e) {
-    message(f, 'le service n’a pas répondu', false);
+    message(f, e.message === 'Failed to fetch'
+      ? 'le service n’a pas répondu' : e.message, false);
   } finally {
     boutons.forEach(b => { b.disabled = false; });
   }
 }
 
-async function envoyerResiliation(f, contrat) {
-  if (!confirm('Résilier le contrat ' + contrat + ' ?')) return;
+function flash(texte) {
+  const z = document.getElementById('flash');
+  z.textContent = texte;
+  z.classList.add('visible');
+  clearTimeout(flash.t);
+  flash.t = setTimeout(() => z.classList.remove('visible'), 2600);
+}
+
+const GENRES = ['site', 'vhost', 'domaine', 'boîte mail', 'base de données',
+                'licence', 'sauvegarde', 'stockage', 'IP', 'autre'];
+
+// parent : la carte sous laquelle on declare ; existant : l'element a editer
+function formElement(parent, existant) {
+  const info = existant ? existant.infos : null;
+  const corps = ouvrirTiroir(existant ? 'Élément #' + existant.cle : 'Nouvel élément',
+    existant ? 'sous ' + info.parent_type + ' ' + info.parent_ref
+             : 'sous ' + LIBELLE[parent.type].toLowerCase() + ' ' + parent.nom);
+  const f = el('form', { autocomplete: 'off', className: 'saisie' });
+  const nom = champ(f, 'Nom', { type: 'text', required: true, maxLength: 190,
+    value: existant ? existant.nom : '', placeholder: 'ex. boutique.exemple.fr' });
+  const genre = champ(f, 'Genre', { type: 'text', maxLength: 40,
+    value: info ? (info.genre || '') : '', placeholder: 'site, vhost, domaine…' });
+  const liste = el('datalist', { id: 'genres' },
+    ...GENRES.map(g => el('option', { value: g })));
+  f.appendChild(liste);
+  genre.setAttribute('list', 'genres');
+  const paire = el('div', { className: 'paire' });
+  const pv = el('input', { type: 'number', step: '0.01', min: '0',
+    placeholder: 'PV', value: info ? (info.prix_vente || '') : '' });
+  const pa = el('input', { type: 'number', step: '0.01', min: '0',
+    placeholder: 'PA', value: info ? (info.prix_achat || '') : '' });
+  paire.append(pv, pa);
+  f.append(el('label', { textContent: 'Prix de vente · prix d’achat' }), paire);
+  const per = periode(f, info && info.periode);
+  const contrat = champ(f, 'Contrat (facultatif)', { type: 'text', maxLength: 100,
+    value: info ? (info.contrat || '') : '' });
+  const client = champ(f, 'Client (facultatif)', { type: 'text', maxLength: 190,
+    value: info ? (info.client || '') : '' });
+  const noteTxt = champ(f, 'Note (facultatif)', { tag: 'textarea', maxLength: 500,
+    rows: 2, value: info ? (info.note || '') : '' });
+
+  const actions = el('div', { className: 'actions' },
+    el('button', { type: 'submit', textContent: 'Enregistrer' }),
+    el('button', { type: 'button', textContent: 'Annuler', onclick: fermerTiroir }));
+  if (existant) {
+    actions.appendChild(el('button', { type: 'button', className: 'danger',
+      textContent: 'Retirer',
+      onclick: () => {
+        if (!confirm('Retirer « ' + existant.nom + ' » ? Ses enfants passeront '
+                     + 'hors parc.')) return;
+        soumettre(f, () => poster('/api/element/retirer', { id: existant.cle }),
+                  'Élément retiré.');
+      } }));
+  }
+  f.appendChild(actions);
+  f.onsubmit = ev => {
+    ev.preventDefault();
+    const charge = {
+      nom: nom.value, genre: genre.value, prix_vente: pv.value,
+      prix_achat: pa.value, periode: per.value, contrat: contrat.value,
+      client: client.value, note: noteTxt.value,
+    };
+    if (existant) {
+      Object.assign(charge, { id: existant.cle, parent_type: info.parent_type,
+                              parent_ref: info.parent_ref });
+    } else {
+      Object.assign(charge, { parent_type: parent.type, parent_ref: parent.cle });
+    }
+    soumettre(f, () => poster('/api/element', charge),
+              existant ? 'Élément corrigé.' : 'Élément déclaré.');
+  };
+  corps.appendChild(f);
+  nom.focus();
+}
+
+// Corriger : remplace la valeur PROPRE de la carte. Les enfants continuent
+// de s'ajouter par-dessus, le tiroir le rappelle.
+function formCorrection(c) {
+  const corps = ouvrirTiroir('Corriger ' + c.nom, LIBELLE[c.type]);
+  corps.appendChild(el('p', { className: 'lecture', textContent:
+    'La correction remplace la valeur propre de la carte ; ses enfants '
+    + 'continuent de s’y ajouter. Un champ vidé lève la correction.' }));
+  const f = el('form', { autocomplete: 'off', className: 'saisie' });
+  const champs = [];
+  const auto = {
+    prix_achat: c.type === 'serveur' ? c.pa_auto : null,
+    prix_vente: c.type === 'vm' ? c.pv_auto : null,
+  };
+  const libelle = { prix_achat: 'PA propre', prix_vente: 'PV propre',
+                    cluster: 'Cluster' };
+  const noms = ['prix_achat', 'prix_vente'].concat(c.type === 'serveur' ? ['cluster'] : []);
+  for (const k of noms) {
+    const corr = c.corrections[k];
+    const actuel = corr ? corr.valeur : '';
+    let aide = '';
+    if (k === 'prix_achat' && c.type === 'serveur') {
+      aide = auto.prix_achat === null ? 'aucun tarif collecté'
+                                      : 'collecté : ' + euro(auto.prix_achat);
+    } else if (k === 'prix_vente' && c.type === 'vm') {
+      aide = 'somme des contrats : ' + euro(auto.prix_vente || 0);
+    } else if (k === 'cluster') {
+      aide = 'Proxmox : ' + (c.infos.cluster_pve || 'nœud seul');
+    } else {
+      aide = 'aucune valeur collectée (0)';
+    }
+    const i = champ(f, libelle[k] + ' — ' + aide, k === 'cluster'
+      ? { type: 'text', maxLength: 190, value: actuel || '',
+          placeholder: 'nom du regroupement' }
+      : { type: 'number', step: '0.01', min: '0', value: actuel === '' ? '' : actuel,
+          placeholder: 'valeur collectée' });
+    if (k === 'cluster') {
+      i.setAttribute('list', 'clusters-connus');
+      f.appendChild(el('datalist', { id: 'clusters-connus' },
+        ...commerce.arbre.filter(x => !x.infos.seul)
+          .map(x => el('option', { value: x.nom }))));
+    }
+    champs.push({ k, i, avant: actuel === null || actuel === undefined ? '' : String(actuel) });
+  }
+  const motif = champ(f, 'Motif (obligatoire)', { type: 'text', required: true,
+    maxLength: 300, placeholder: 'ex. tarif négocié, licence Windows…' });
+  f.appendChild(el('div', { className: 'actions' },
+    el('button', { type: 'submit', textContent: 'Enregistrer' }),
+    el('button', { type: 'button', textContent: 'Annuler', onclick: fermerTiroir })));
+  f.onsubmit = ev => {
+    ev.preventDefault();
+    const changes = champs.filter(x => x.i.value.trim() !== x.avant);
+    if (!changes.length) { message(f, 'rien n’a changé', false); return; }
+    soumettre(f, async () => {
+      for (const x of changes) {
+        await poster('/api/surcharge', { cible_type: c.type, cible_ref: c.cle,
+          champ: x.k, valeur: x.i.value.trim(), motif: motif.value });
+      }
+    }, changes.length > 1 ? 'Corrections enregistrées.' : 'Correction enregistrée.');
+  };
+  corps.appendChild(f);
+  (champs[0] || {}).i && champs[0].i.focus();
+}
+
+function formVente(vm, existant) {
+  const corps = ouvrirTiroir(existant ? 'Contrat ' + existant.contrat : 'Nouveau contrat',
+                             'VM ' + vm);
+  const f = el('form', { autocomplete: 'off', className: 'saisie' });
+  const contrat = champ(f, 'Numéro de contrat (Dolibarr)', { type: 'text',
+    required: true, maxLength: 100, value: existant ? existant.contrat : '',
+    readOnly: !!existant });
+  const prix = champ(f, 'Prix de vente', { type: 'number', step: '0.01',
+    min: '0', required: true, value: existant ? existant.prix_vente : '' });
+  const per = periode(f, existant && existant.periode);
+  const client = champ(f, 'Client (facultatif)', { type: 'text', maxLength: 190,
+    value: existant && existant.client ? existant.client : '' });
+  const actions = el('div', { className: 'actions' },
+    el('button', { type: 'submit', textContent: 'Enregistrer' }),
+    el('button', { type: 'button', textContent: 'Annuler', onclick: fermerTiroir }));
+  if (existant) {
+    actions.appendChild(el('button', { type: 'button', className: 'danger',
+      textContent: 'Résilier',
+      onclick: () => {
+        if (!confirm('Résilier le contrat ' + existant.contrat + ' ?')) return;
+        soumettre(f, () => poster('/api/commercial/resilier',
+                                  { contrat: existant.contrat }),
+                  'Contrat résilié.');
+      } }));
+  }
+  f.appendChild(actions);
+  f.onsubmit = ev => {
+    ev.preventDefault();
+    soumettre(f, () => poster('/api/commercial', {
+      vm_name: vm, contrat: contrat.value, prix_vente: prix.value,
+      periode: per.value, client: client.value,
+    }), existant ? 'Contrat corrigé.' : 'Vente enregistrée.');
+  };
+  corps.appendChild(f);
+  (existant ? prix : contrat).focus();
+}
+
+// Ce qui a change, champ par champ : "prix_vente : 12.5 → 25". Le JSON
+// complet reste en base pour un litige ; a l'ecran, seul l'ecart se lit.
+function ecarts(avant, apres) {
+  const lire = t => { try { return t ? JSON.parse(t) : {}; } catch (e) { return {}; } };
+  const a = lire(avant), b = lire(apres), out = [];
+  // la cible est deja dans le titre de la ligne
+  const ignore = new Set(['id', 'cree_le', 'cree_par', 'maj_le', 'maj_par',
+                          'champ', 'cible_ref', 'cible_type']);
+  for (const k of Object.keys(b)) {
+    if (ignore.has(k)) continue;
+    const va = a[k] === undefined ? null : a[k], vb = b[k];
+    if (String(va) === String(vb)) continue;
+    if (!avant && (vb === null || vb === '')) continue;
+    out.push(k + ' : ' + (avant ? (va === null ? '∅' : va) + ' → ' : '')
+             + (vb === null ? '∅' : vb));
+  }
+  return out;
+}
+
+async function afficherJournal() {
+  const corps = ouvrirTiroir('Journal des saisies', '200 dernières');
   try {
-    const r = await fetch('/api/commercial/resilier', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contrat }),
-    });
-    const rep = await r.json().catch(() => ({}));
-    if (!r.ok) { message(f, rep.erreur || 'refus', false); return; }
-    f.remove();
-    await chargerCommerce();
+    const r = await fetch('/api/journal', { headers: { Accept: 'application/json' } });
+    if (!r.ok) throw new Error('refus (' + r.status + ')');
+    const lignes = (await r.json()).journal || [];
+    if (!lignes.length) {
+      corps.appendChild(el('p', { className: 'lecture', textContent: 'Aucune saisie.' }));
+    }
+    const ul = el('ul', { className: 'journal' });
+    for (const l of lignes) {
+      ul.appendChild(el('li', null,
+        el('b', { textContent: l.action + ' · ' + l.cible }),
+        el('small', { textContent: l.le.replace('T', ' ').slice(0, 16) + ' · ' + l.par }),
+        ...ecarts(l.avant, l.apres).map(t => el('code', { textContent: t }))));
+    }
+    corps.appendChild(ul);
   } catch (e) {
-    message(f, 'le service n’a pas répondu', false);
+    corps.appendChild(el('p', { className: 'msg ko', textContent: e.message }));
   }
 }
+
+document.getElementById('btn-rent').onclick = () => basculerRent(!vueRent.actif);
+document.getElementById('rent-recherche').oninput = ev => {
+  vueRent.filtre = ev.target.value.trim().toLowerCase();
+  apresFiltre();
+};
+document.getElementById('rent-perte').onchange = ev => {
+  vueRent.perte = ev.target.checked; apresFiltre();
+};
+document.getElementById('rent-alertes').onchange = ev => {
+  vueRent.alertes = ev.target.checked; apresFiltre();
+};
+document.getElementById('rent-deplier').onclick = () => {
+  const tout = commerce.ouverts.size < commerce.index.size / 2;
+  commerce.ouverts.clear();
+  if (tout) {
+    for (const { chemin } of commerce.index.values()) commerce.ouverts.add(chemin.join('>'));
+  } else {
+    commerce.arbre.forEach(c => commerce.ouverts.add(cleIndex(c)));
+  }
+  document.getElementById('rent-deplier').textContent = tout ? 'Replier' : 'Tout déplier';
+  dessinerRent();
+};
+document.getElementById('rent-journal').onclick = afficherJournal;
 
 // ----------------------------------------------------------------- filtres
 function construireFiltres() {
@@ -1235,10 +2935,13 @@ document.getElementById('btn-theme').onclick = () => {
 };
 addEventListener('keydown', ev => {
   if (ev.key === 'Escape') {
+    if (tiroir.classList.contains('visible')) { fermerTiroir(); return; }
     fiche.classList.remove('visible'); etat.selection = null; dessiner();
   }
-  if (ev.key === '/' && document.activeElement.tagName !== 'INPUT') {
-    ev.preventDefault(); document.getElementById('recherche').focus();
+  const saisie = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName);
+  if (ev.key === '/' && !saisie) {
+    ev.preventDefault();
+    document.getElementById(vueRent.actif ? 'rent-recherche' : 'recherche').focus();
   }
 });
 addEventListener('resize', () => appliquerVue());
@@ -1273,9 +2976,42 @@ if (!localStorage.getItem(CLE)) {
   dessiner();
 }
 
+// ---------------------------------------------------------------- identite
+// Qui est connecte, avec quels roles, tels que le service les recoit d'Apache
+// apres l'OIDC. L'infobulle montre les groupes recus : c'est le premier
+// endroit ou regarder quand un role manque.
+async function chargerMoi() {
+  try {
+    const r = await fetch('/api/moi', { headers: { Accept: 'application/json' } });
+    if (!r.ok) return;
+    const m = await r.json();
+    const zone = document.getElementById('moi');
+    zone.replaceChildren(
+      el('span', { className: 'moi-nom', textContent: m.utilisateur }),
+      el('span', { className: 'moi-roles',
+                   textContent: m.roles.length ? m.roles.join(' · ') : 'aucun rôle' }));
+    zone.title = 'Groupes reçus : ' + (m.groupes.join(', ') || 'aucun')
+      + (m.developpement ? '\nMode développement : pas d’OIDC devant le service' : '');
+    if (m.deconnexion) {
+      zone.appendChild(el('a', { className: 'bouton', textContent: 'Se déconnecter',
+        href: m.deconnexion + encodeURIComponent(location.origin + '/') }));
+    }
+    zone.hidden = false;
+    document.getElementById('btn-jeton').hidden = !m.peut_emettre_jeton;
+  } catch (e) { /* page ouverte sans son service : rien a montrer */ }
+}
+
+// Le cookie OIDC a expire : Apache repond 401 a l'API (OIDCUnAuthAction).
+// Recharger la page repasse par Authentik, qui rouvre la session.
+function sessionExpiree() {
+  document.getElementById('session').hidden = false;
+}
+document.getElementById('session-reprendre').onclick = () => location.reload();
+
 // Le volet commercial se charge apres le dessin : la topologie s'affiche
 // sans attendre la base, et s'enrichit quand la reponse arrive.
-chargerCommerce();
+chargerMoi();
+chargerCommerce().then(() => chargerVues(prefsRent.vue));
 </script>
 </body>
 </html>

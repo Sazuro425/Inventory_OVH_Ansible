@@ -338,12 +338,31 @@ def probe_cluster(conf, server):
             })
             if item.get("local"):
                 out["node"] = item.get("name")
-    # un noeud seul ne renvoie pas d'entree "cluster"
+    # Un noeud seul ne renvoie pas d'entree "cluster". La clef fabriquee porte
+    # l'hote et non le nom PVE : deux noeuds seuls installes avec le nom par
+    # defaut ("pve") auraient sinon la meme, et gather() prendrait le second
+    # pour un membre du premier — ses invites ne seraient jamais releves.
     if not out["cluster"]:
-        out["cluster"] = "standalone:" + (out["node"] or host)
+        out["cluster"] = "standalone:" + host
     if out["node"]:
         out["hw"] = node_hardware(cli, out["node"])
     return out
+
+
+def hote_des_invites(probes, guests):
+    """L'hote sur lequel chaque invite tourne vraiment, par id(invite).
+
+    /cluster/resources est lu sur un seul representant : via_host vaut donc
+    ce representant pour tout le cluster. Le noeud reel est dans "node", et
+    (cluster, noeud) designe un hote sans ambiguite. Si ce couple ne mene a
+    rien — noeud injoignable au moment de la sonde — on retombe sur
+    via_host, qui reste au moins dans le bon cluster.
+    """
+    par_noeud = {(p.get("cluster"), p.get("node")): p["host"]
+                 for p in probes if not p.get("error") and p.get("node")}
+    return {id(g): par_noeud.get((g.get("cluster"), g.get("node")),
+                                 g.get("via_host"))
+            for g in guests}
 
 
 def collect_cluster(conf, probe, detail):

@@ -93,3 +93,15 @@ db:
   auto_schema: true
   # nombre de snapshots conserves (vide = tout garder)
   keep_runs: 200
+
+# Service web : qui lit, qui saisit, qui emet un jeton Ansible.
+# Les groupes sont ceux de la claim "groups" d'Authentik (voir
+# deploy/inventaire-oidc.conf.example), les memes que dans le vhost Apache.
+# Une liste de comptes (lecteurs, commerciaux, admins) peut s'y ajouter.
+web:
+  groupe_lecture: inventaire-lecture
+  groupe_commercial: inventaire-commercial
+  groupe_admin: inventaire-admin
+  # commerciaux: [compta]
+  # chemin de l'OIDCRedirectURI, pour le lien de deconnexion
+  oidc_redirect_uri: /oidc-callback
