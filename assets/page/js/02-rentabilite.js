@@ -262,7 +262,8 @@ function listeContrats(d, c) {
 
 // ------------------------------------------------------------- vue arbre
 const vueRent = { actif: false, filtre: '', perte: false, alertes: false,
-                  mode: 'graphiques', figures: {} };
+                  mode: 'graphiques', figures: {},
+                  panneaux: null };   // null : les panneaux par defaut
 
 function basculerRent(actif) {
   vueRent.actif = actif;

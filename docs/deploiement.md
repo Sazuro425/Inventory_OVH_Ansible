@@ -600,6 +600,25 @@ Les filtres (clusters, datacenters, clients, roles, texte, a
 perte, avec alerte) valent pour l'arbre, le tableau et les graphiques ; ils
 choisissent des cartes, ils ne recalculent pas leurs montants.
 
+**Les tableaux de bord.** Chaque vue porte aussi ses colonnes et ses panneaux :
+
+- *Tableau > Colonnes…* : choisir et ordonner les colonnes, niveau par niveau ;
+  l'export « Exporter cette vue » suit ce choix.
+- *Graphiques > Personnaliser* : ajouter, retirer, deplacer, elargir des
+  panneaux. Les quatre figures d'origine sont des panneaux « prédéfinis » ;
+  les panneaux libres — barres, chiffre clé, tableau — prennent une mesure
+  (CA, PA, ROI, marge, coût OVH, VM, vCPU, RAM allouée ou libre, vCPU par
+  thread...) a un niveau, regroupee ou non par cluster, serveur,
+  datacenter, client ou rôle. Exemple pour anticiper un achat : barres,
+  niveau VM, « RAM allouée (Go) », regroupée par cluster.
+
+Un ratio (marge, RAM allouée %, vCPU par thread) se recalcule depuis ses
+termes pour un groupe ou un total, il n'est jamais une moyenne de
+pourcentages. La vue d'ensemble garde les quatre figures ; une vue
+enregistrée rouvre ses panneaux et ses colonnes telles qu'elle les a
+laissees, et le serveur controle leur forme champ par champ
+(`db_vues.verifier_panneau`).
+
 « Enregistrer la vue » garde sous un nom — *Commercial*, *Compta
 mensuelle* — les filtres, la presentation, le niveau et le tri du tableau.
 Une vue est partagee avec l'equipe par defaut, ou privee. Tout lecteur en

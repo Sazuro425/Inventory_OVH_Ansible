@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 
 from db_base import (
     SaisieInterdite,
@@ -24,6 +25,84 @@ from db_base import (
 MODES_VUE = ("arbre", "tableau", "graphiques")
 NIVEAUX_VUE = ("cluster", "serveur", "vm", "element", "tout")
 LISTES_VUE = ("clusters", "datacenters", "clients", "roles")
+
+# Tableau de bord : les colonnes du tableau, niveau par niveau, et les
+# panneaux du mode graphiques. La page ne connait que ces formes ; un
+# identifiant de colonne ou de mesure qu'elle ne connait pas est ignore a
+# l'affichage, d'ou un simple controle de forme ici.
+NIVEAUX_DONNEES = ("cluster", "serveur", "vm", "element")
+TYPES_PANNEAU = ("figure", "barres", "chiffre", "tableau")
+FIGURES_PANNEAU = ("roi", "capa", "clients", "ram")
+GROUPES_PANNEAU = ("cluster", "serveur", "datacenter", "client", "role")
+PANNEAUX_MAX = 24
+COLONNES_MAX = 40
+_ID_VUE = re.compile(r"^[a-z][a-z0-9_]{0,29}$")
+
+
+def _identifiant(v, quoi):
+    if not isinstance(v, str) or not _ID_VUE.match(v):
+        raise VenteInvalide("{} illisible".format(quoi))
+    return v
+
+
+def verifier_colonnes(d):
+    """{niveau: [colonne, ...]} : l'ordre est celui de l'affichage."""
+    if not isinstance(d, dict):
+        raise VenteInvalide("colonnes attend un objet par niveau")
+    propre = {}
+    for niveau, ids in d.items():
+        if niveau not in NIVEAUX_VUE:
+            raise VenteInvalide("niveau de colonnes inconnu : " + str(niveau)[:20])
+        if not isinstance(ids, list) or not ids or len(ids) > COLONNES_MAX:
+            raise VenteInvalide("colonnes : une liste de 1 a {} colonnes".format(
+                COLONNES_MAX))
+        vus = []
+        for i in ids:
+            i = _identifiant(i, "colonne")
+            if i not in vus:
+                vus.append(i)
+        propre[niveau] = vus
+    return propre
+
+
+def verifier_panneau(p):
+    """Un panneau du tableau de bord, normalise comme la page l'ecrit."""
+    if not isinstance(p, dict):
+        raise VenteInvalide("un panneau est un objet")
+    connus = {"type", "figure", "titre", "niveau", "mesure", "groupe", "top",
+              "largeur"}
+    inconnus = sorted(set(p) - connus)
+    if inconnus:
+        raise VenteInvalide("champ de panneau inconnu : " + ", ".join(inconnus))
+    t = p.get("type")
+    if t not in TYPES_PANNEAU:
+        raise VenteInvalide("type de panneau inconnu : attendu "
+                            + ", ".join(TYPES_PANNEAU))
+    propre = {"type": t, "largeur": 2 if p.get("largeur") == 2 else 1}
+    titre = _texte(p.get("titre"), "le titre du panneau", 80)
+    if titre:
+        propre["titre"] = titre
+    if t == "figure":
+        if p.get("figure") not in FIGURES_PANNEAU:
+            raise VenteInvalide("figure inconnue : attendu "
+                                + ", ".join(FIGURES_PANNEAU))
+        propre["figure"] = p["figure"]
+        return propre
+    if p.get("niveau") not in NIVEAUX_DONNEES:
+        raise VenteInvalide("niveau de panneau inconnu")
+    propre["niveau"] = p["niveau"]
+    propre["mesure"] = _identifiant(p.get("mesure"), "mesure")
+    if p.get("groupe") not in (None, ""):
+        if p["groupe"] not in GROUPES_PANNEAU:
+            raise VenteInvalide("regroupement inconnu : attendu "
+                                + ", ".join(GROUPES_PANNEAU))
+        propre["groupe"] = p["groupe"]
+    if t != "chiffre":
+        top = p.get("top", 10)
+        if isinstance(top, bool) or not isinstance(top, int) or not 1 <= top <= 100:
+            raise VenteInvalide("nombre de lignes du panneau : de 1 a 100")
+        propre["top"] = top
+    return propre
 
 
 def verifier_vue(v):
@@ -46,7 +125,7 @@ def verifier_vue(v):
     if not isinstance(d, dict):
         raise VenteInvalide("la definition d'une vue est un objet")
     connus = {"mode", "niveau", "texte", "perte", "alertes", "tri", "sens",
-              *LISTES_VUE}
+              "colonnes", "panneaux", *LISTES_VUE}
     inconnus = sorted(set(d) - connus)
     if inconnus:
         raise VenteInvalide("champ de vue inconnu : " + ", ".join(inconnus))
@@ -80,6 +159,14 @@ def verifier_vue(v):
         if not isinstance(lst, list) or len(lst) > 300:
             raise VenteInvalide("{} attend une liste (300 au plus)".format(k))
         propre[k] = sorted({_texte(x, k, 190, obligatoire=True) for x in lst})
+    if d.get("colonnes") not in (None, {}):
+        propre["colonnes"] = verifier_colonnes(d["colonnes"])
+    if d.get("panneaux") is not None:
+        lst = d["panneaux"]
+        if not isinstance(lst, list) or len(lst) > PANNEAUX_MAX:
+            raise VenteInvalide("panneaux : une liste de {} au plus".format(
+                PANNEAUX_MAX))
+        propre["panneaux"] = [verifier_panneau(p) for p in lst]
     texte_json = json.dumps(propre, ensure_ascii=False, sort_keys=True)
     if len(texte_json) > 16000:
         raise VenteInvalide("definition de vue trop volumineuse")

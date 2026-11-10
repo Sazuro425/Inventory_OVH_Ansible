@@ -91,6 +91,10 @@ __STYLE__
     <label class="puce seul-filtre"><input type="checkbox" id="rent-alertes"> avec alerte</label>
     <button id="rent-btn-filtres" title="Clusters, datacenters, clients, rôles">Filtres</button>
     <button id="rent-deplier" class="seul-arbre">Tout déplier</button>
+    <button id="rent-personnaliser" class="seul-graph"
+            title="Ajouter, retirer, disposer les panneaux de cette vue">Personnaliser</button>
+    <button id="rent-defaut-panneaux" class="seul-graph" hidden
+            title="Revenir aux quatre figures d’origine">Panneaux par défaut</button>
     <span class="pousse"></span>
     <button id="rent-journal" title="Qui a saisi quoi, et quand">Journal</button>
     <a class="bouton" id="rent-export" href="/api/export.csv" download
@@ -107,6 +111,7 @@ __STYLE__
       <button data-niveau="element">Éléments</button>
       <button data-niveau="tout">Tout</button>
     </div>
+    <button id="plat-colonnes" title="Choisir et ordonner les colonnes de ce niveau">Colonnes…</button>
     <span class="lecture" id="plat-compte"></span>
   </div>
   <div class="rent-avert" id="rent-avert"></div>
@@ -127,28 +132,7 @@ __STYLE__
       <tfoot id="plat-pied"></tfoot>
     </table>
   </div>
-  <div class="viz-mur seul-graph">
-    <figure class="viz">
-      <figcaption><b>Résultat par cluster</b>
-        <small>ROI mensuel, CA − PA. Un clic ouvre le cluster dans l’arbre.</small></figcaption>
-      <div class="viz-zone" id="viz-roi"></div>
-    </figure>
-    <figure class="viz">
-      <figcaption><b>Ce qui rentre, ce qui sort</b>
-        <small>Chiffre d’affaires et prix d’achat mensuels, par cluster.</small></figcaption>
-      <div class="viz-zone" id="viz-capa"></div>
-    </figure>
-    <figure class="viz">
-      <figcaption><b>Chiffre d’affaires par client</b>
-        <small>Contrats et éléments déclarés, ramenés au mois ; part du CA total.</small></figcaption>
-      <div class="viz-zone" id="viz-clients"></div>
-    </figure>
-    <figure class="viz large">
-      <figcaption><b>RAM allouée par serveur</b>
-        <small>En % de la RAM physique. ▲ au-delà de 85 % l’hôte est tendu, ⚠ au-delà de 100 % il est surréservé.</small></figcaption>
-      <div class="viz-zone" id="viz-ram"></div>
-    </figure>
-  </div>
+  <div class="viz-mur seul-graph" id="viz-mur"></div>
   <div class="vente rent-orph" id="rent-orphelins"></div>
   <p class="rent-pied">
     Chaque carte cumule ses enfants : PA = achat propre + achats des enfants,

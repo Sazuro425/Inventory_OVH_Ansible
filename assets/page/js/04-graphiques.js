@@ -119,7 +119,9 @@ function libelleGroupe(c) {
 // contredire. colonnes suit le format de COLONNES_PLAT (val, num, euro...).
 const FIGURES = [
   {
-    id: 'viz-roi', fichier: 'resultat-par-cluster',
+    id: 'viz-roi', cle: 'roi', titre: 'Résultat par cluster',
+    sous: 'ROI mensuel, CA − PA. Un clic ouvre le cluster dans l’arbre.',
+    fichier: 'resultat-par-cluster',
     rangs: () => lignesFiltrees('cluster')
       .map(r => ({ c: r.c, nom: libelleGroupe(r.c) }))
       .sort((a, b) => b.c.roi - a.c.roi),
@@ -136,7 +138,9 @@ const FIGURES = [
     dessiner: dessinRoi,
   },
   {
-    id: 'viz-capa', fichier: 'ca-et-pa-par-cluster',
+    id: 'viz-capa', cle: 'capa', titre: 'Ce qui rentre, ce qui sort',
+    sous: 'Chiffre d’affaires et prix d’achat mensuels, par cluster.',
+    fichier: 'ca-et-pa-par-cluster',
     rangs: () => lignesFiltrees('cluster')
       .map(r => ({ c: r.c, nom: libelleGroupe(r.c) }))
       .sort((a, b) => b.c.pv - a.c.pv),
@@ -150,7 +154,9 @@ const FIGURES = [
     dessiner: dessinCaPa,
   },
   {
-    id: 'viz-clients', fichier: 'ca-par-client',
+    id: 'viz-clients', cle: 'clients', titre: 'Chiffre d’affaires par client',
+    sous: 'Contrats et éléments déclarés, ramenés au mois ; part du CA total.',
+    fichier: 'ca-par-client',
     rangs: rangsClients,
     colonnes: [
       { titre: 'Client', val: r => r.nom },
@@ -160,7 +166,9 @@ const FIGURES = [
     dessiner: dessinClients,
   },
   {
-    id: 'viz-ram', fichier: 'ram-par-serveur',
+    id: 'viz-ram', cle: 'ram', titre: 'RAM allouée par serveur',
+    sous: 'En % de la RAM physique. ▲ au-delà de 85 % l’hôte est tendu, ⚠ au-delà de 100 % il est surréservé.',
+    fichier: 'ram-par-serveur',
     rangs: () => lignesFiltrees('serveur')
       .filter(r => r.c.capacite && r.c.capacite.ram_pct !== undefined)
       .map(r => ({ c: r.c, groupe: r.groupe, nom: r.c.nom.split('.')[0]
@@ -369,45 +377,5 @@ function tableFigure(zone, f, rangs) {
   zone.appendChild(el('div', { className: 'table-defile mini' }, t));
 }
 
-function dessinerGraphes() {
-  for (const f of FIGURES) {
-    const zone = document.getElementById(f.id);
-    zone.replaceChildren();
-    const rangs = f.rangs();
-    const enTable = vueRent.figures[f.id] === 'tableau';
-    const fig = zone.closest('figure');
-    fig.querySelectorAll('.fig-modes button').forEach(b =>
-      b.classList.toggle('actif', (b.dataset.vue === 'tableau') === enTable));
-    if (!rangs.length) { graphVide(zone); continue; }
-    if (enTable) tableFigure(zone, f, rangs);
-    else f.dessiner(zone, rangs);
-  }
-}
-
-// Les outils de chaque figure : graphique ou tableau, et l'export CSV de ce
-// que la figure montre — filtres compris.
-for (const f of FIGURES) {
-  const cap = document.getElementById(f.id).closest('figure').querySelector('figcaption');
-  const modes = el('div', { className: 'segment fig-modes', role: 'group' },
-    el('button', { textContent: 'Graphique', title: 'Afficher en graphique' }),
-    el('button', { textContent: 'Tableau', title: 'Afficher les valeurs en tableau' }));
-  modes.children[0].dataset.vue = 'graphique';
-  modes.children[1].dataset.vue = 'tableau';
-  for (const b of modes.children) {
-    b.onclick = () => {
-      vueRent.figures[f.id] = b.dataset.vue;
-      sauverRent();
-      cacherBulle();
-      dessinerGraphes();
-    };
-  }
-  const csv = el('button', { textContent: 'CSV', title: 'Exporter cette figure en CSV',
-    onclick: () => {
-      const rangs = f.rangs();
-      telechargerCsv('rentabilite-' + f.fichier, f.colonnes, rangs);
-      flash(rangs.length + ' ligne' + (rangs.length > 1 ? 's' : '') + ' exportée'
-            + (rangs.length > 1 ? 's.' : '.'));
-    } });
-  cap.prepend(el('div', { className: 'fig-outils' }, modes, csv));
-}
-
+// Le dessin des figures, et leurs outils, passent par les panneaux du
+// tableau de bord : voir 04b-panneaux.js.

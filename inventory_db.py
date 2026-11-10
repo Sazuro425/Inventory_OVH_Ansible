@@ -92,13 +92,22 @@ from db_saisies import (  # noqa: F401
     verifier_vente,
 )
 from db_vues import (  # noqa: F401
+    COLONNES_MAX,
+    FIGURES_PANNEAU,
+    GROUPES_PANNEAU,
     LISTES_VUE,
     MODES_VUE,
+    NIVEAUX_DONNEES,
     NIVEAUX_VUE,
+    PANNEAUX_MAX,
+    TYPES_PANNEAU,
+    _identifiant,
     _vue_lisible,
     _vue_modifiable,
     enregistrer_vue,
     lister_vues,
     retirer_vue,
+    verifier_colonnes,
+    verifier_panneau,
     verifier_vue,
 )

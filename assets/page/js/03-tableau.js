@@ -78,6 +78,7 @@ const COLONNES_PLAT = [
 
 const plat = {
   niveau: 'serveur', tri: null, sens: 1,   // tri null : ordre de l'arbre
+  colonnes: {},                            // niveau -> [id], choix de la vue
 };
 // Ce navigateur se souvient de la vue choisie et de la presentation de
 // chaque figure. Le reste — filtres, mode, niveau — appartient a la vue :
@@ -109,7 +110,68 @@ function lignesPlat() {
   return lignes;
 }
 
-const colonnesNiveau = () => COLONNES_PLAT.filter(k => k.niv.includes(plat.niveau));
+const colonnesDefaut = niveau => COLONNES_PLAT.filter(k => k.niv.includes(niveau));
+
+// Les colonnes du niveau, dans l'ordre choisi par la vue ; une colonne
+// inconnue (vue d'une version plus recente) est ignoree, pas une erreur.
+function colonnesNiveau() {
+  const dispo = colonnesDefaut(plat.niveau);
+  const choix = plat.colonnes[plat.niveau];
+  if (!choix) return dispo;
+  const parId = new Map(dispo.map(k => [k.id, k]));
+  const cols = choix.map(id => parId.get(id)).filter(Boolean);
+  return cols.length ? cols : dispo;
+}
+
+// Choisir et ordonner les colonnes du niveau affiche. Le nom reste : sans
+// lui, une ligne ne se reconnait plus.
+function formColonnes() {
+  const niveau = plat.niveau;
+  const corps = ouvrirTiroir('Colonnes', 'niveau ' + (NIVEAUX.find(n => n[0] === niveau) || [, niveau])[1]);
+  const vues = new Set(colonnesNiveau().map(k => k.id));
+  const ordre = [...colonnesNiveau(), ...colonnesDefaut(niveau).filter(k => !vues.has(k.id))]
+    .map(k => ({ k, ok: vues.has(k.id) }));
+  const f = el('form', { className: 'saisie' });
+  const liste = el('ul', { className: 'liste-colonnes' });
+  const redessiner = () => {
+    liste.replaceChildren(...ordre.map((x, i) => {
+      const c = el('input', { type: 'checkbox', checked: x.ok, disabled: x.k.id === 'nom',
+                              onchange: () => { x.ok = c.checked; } });
+      const bouger = (d) => () => {
+        const j = i + d;
+        if (j < 0 || j >= ordre.length) return;
+        [ordre[i], ordre[j]] = [ordre[j], ordre[i]];
+        redessiner();
+      };
+      return el('li', null, el('label', { className: 'case' }, c, x.k.titre),
+        el('button', { type: 'button', textContent: '↑', title: 'Monter', onclick: bouger(-1),
+                       disabled: i === 0 }),
+        el('button', { type: 'button', textContent: '↓', title: 'Descendre', onclick: bouger(1),
+                       disabled: i === ordre.length - 1 }));
+    }));
+  };
+  redessiner();
+  f.append(liste, el('div', { className: 'actions' },
+    el('button', { type: 'submit', textContent: 'Appliquer' }),
+    el('button', { type: 'button', textContent: 'Par défaut', onclick: () => {
+      delete plat.colonnes[niveau];
+      fermerTiroir();
+      dessinerPlat();
+    } }),
+    el('button', { type: 'button', textContent: 'Annuler', onclick: fermerTiroir })));
+  f.onsubmit = ev => {
+    ev.preventDefault();
+    const ids = ordre.filter(x => x.ok).map(x => x.k.id);
+    const defaut = colonnesDefaut(niveau).map(k => k.id);
+    if (JSON.stringify(ids) === JSON.stringify(defaut)) delete plat.colonnes[niveau];
+    else plat.colonnes[niveau] = ids;
+    if (plat.tri && !ids.includes(plat.tri)) plat.tri = null;
+    fermerTiroir();
+    dessinerPlat();
+    flash('Colonnes appliquées. Enregistre la vue pour les garder.');
+  };
+  corps.appendChild(f);
+}
 
 function formatCellule(k, v) {
   if (v === null || v === undefined || v === '') return '—';
@@ -256,6 +318,7 @@ document.querySelectorAll('#rent-niveaux button').forEach(b => {
   };
 });
 document.getElementById('rent-export-vue').onclick = exporterVue;
+document.getElementById('plat-colonnes').onclick = formColonnes;
 document.body.classList.toggle('mode-plat', vueRent.mode === 'tableau');
 document.body.classList.toggle('mode-graph', vueRent.mode === 'graphiques');
 document.querySelectorAll('#rent-modes button').forEach(b =>

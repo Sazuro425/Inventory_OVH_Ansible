@@ -257,6 +257,47 @@ def _():
     refuse(db.verifier_vue, {"nom": "x", "definition": {"tri": "roi; DROP"}})
 
 
+@test("tableau de bord : colonnes et panneaux normalises")
+def _():
+    d = db.verifier_vue({"nom": "Capacite", "definition": {
+        "colonnes": {"serveur": ["nom", "ram_pct", "nom", "vcpu_ratio"]},
+        "panneaux": [
+            {"type": "figure", "figure": "ram", "largeur": 2},
+            {"type": "barres", "niveau": "vm", "mesure": "ram", "groupe": "cluster",
+             "top": 15, "titre": " RAM par cluster "},
+            {"type": "chiffre", "niveau": "serveur", "mesure": "pv", "groupe": "",
+             "top": 99, "largeur": 3}]}})[3]
+    egal(d["colonnes"], {"serveur": ["nom", "ram_pct", "vcpu_ratio"]})
+    egal(d["panneaux"], [
+        {"type": "figure", "figure": "ram", "largeur": 2},
+        {"type": "barres", "niveau": "vm", "mesure": "ram", "groupe": "cluster",
+         "top": 15, "titre": "RAM par cluster", "largeur": 1},
+        {"type": "chiffre", "niveau": "serveur", "mesure": "pv", "largeur": 1}])
+    egal(db.verifier_vue({"nom": "x", "definition": {"panneaux": []}})[3],
+         {"panneaux": []}, "un tableau de bord vide reste un choix")
+
+
+@test("tableau de bord : formes refusees")
+def _():
+    def vue(**d):
+        return {"nom": "x", "definition": d}
+    for mauvais in (
+            vue(colonnes={"serveur": []}),
+            vue(colonnes={"pirate": ["nom"]}),
+            vue(colonnes={"vm": ["Nom; DROP"]}),
+            vue(panneaux=[{"type": "html", "niveau": "vm", "mesure": "pv"}]),
+            vue(panneaux=[{"type": "figure", "figure": "autre"}]),
+            vue(panneaux=[{"type": "barres", "niveau": "vm", "mesure": "pv",
+                           "script": "x"}]),
+            vue(panneaux=[{"type": "barres", "niveau": "tout", "mesure": "pv"}]),
+            vue(panneaux=[{"type": "barres", "niveau": "vm", "mesure": "pv",
+                           "top": 0}]),
+            vue(panneaux=[{"type": "barres", "niveau": "vm", "mesure": "pv",
+                           "groupe": "pays"}]),
+            vue(panneaux=[{"type": "chiffre", "niveau": "vm", "mesure": "pv"}] * 25)):
+        refuse(db.verifier_vue, mauvais)
+
+
 @test("modifier la vue d'un autre est interdit (403), pas invalide (422)")
 def _():
     egal(issubclass(db.SaisieInterdite, db.VenteInvalide), True)

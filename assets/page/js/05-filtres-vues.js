@@ -186,14 +186,29 @@ function etatCourant() {
   for (const [k] of CRITERES) {
     if (selection[k].size) d[k] = [...selection[k]].sort();
   }
+  // le tableau de bord appartient a la vue, quel que soit le mode affiche
+  if (Object.keys(plat.colonnes).length) {
+    d.colonnes = JSON.parse(JSON.stringify(plat.colonnes));
+  }
+  if (vueRent.panneaux) d.panneaux = vueRent.panneaux.map(normPanneau);
   return d;
 }
 
-function canon(d) {
-  const o = {};
-  for (const k of Object.keys(d || {}).sort()) {
-    o[k] = Array.isArray(d[k]) ? [...d[k]].sort() : d[k];
+// Le serveur range les cles par ordre alphabetique, a toute profondeur : on
+// fait de meme avant de comparer.
+function triCles(v) {
+  if (Array.isArray(v)) return v.map(triCles);
+  if (v && typeof v === 'object') {
+    const o = {};
+    for (const k of Object.keys(v).sort()) o[k] = triCles(v[k]);
+    return o;
   }
+  return v;
+}
+
+function canon(d) {
+  const o = triCles(d || {});
+  for (const [k] of CRITERES) if (o[k]) o[k] = [...o[k]].sort();
   // un niveau ou un tri hors du mode tableau n'a pas d'effet
   if (o.mode !== 'tableau') { delete o.niveau; delete o.tri; delete o.sens; }
   return JSON.stringify(o);
@@ -209,6 +224,9 @@ function appliquerDefinition(d) {
   document.getElementById('rent-perte').checked = vueRent.perte;
   document.getElementById('rent-alertes').checked = vueRent.alertes;
   plat.niveau = d.niveau || 'serveur';
+  plat.colonnes = d.colonnes ? JSON.parse(JSON.stringify(d.colonnes)) : {};
+  vueRent.panneaux = Array.isArray(d.panneaux) ? d.panneaux.map(normPanneau) : null;
+  edition = false;
   plat.tri = d.tri || null;
   plat.sens = d.sens === -1 ? -1 : 1;
   vueRent.cible = null;
@@ -292,6 +310,10 @@ document.getElementById('vue-enregistrer').onclick = () => {
   if (d.texte) resume.appendChild(el('li', { textContent: 'Texte : ' + d.texte }));
   if (d.perte) resume.appendChild(el('li', { textContent: 'À perte seulement' }));
   if (d.alertes) resume.appendChild(el('li', { textContent: 'Avec alerte seulement' }));
+  if (d.colonnes) resume.appendChild(el('li', { textContent: 'Colonnes choisies : '
+    + Object.keys(d.colonnes).map(n => (NIVEAUX.find(x => x[0] === n) || [, n])[1]).join(', ') }));
+  if (d.panneaux) resume.appendChild(el('li', { textContent: 'Tableau de bord : '
+    + d.panneaux.length + ' panneau' + (d.panneaux.length > 1 ? 'x' : '') }));
   f.appendChild(resume);
   const envoyer = (id) => soumettre(f, async () => {
     const rep = await poster('/api/vues', { id, nom: nom.value, partagee: part.checked,

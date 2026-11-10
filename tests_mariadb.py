@@ -203,15 +203,22 @@ def _():
                                "motif": "tarif negocie"}, "evan")
         nouveau = db.creer_role(c, {"libelle": "Serveur Node.js"}, "evan")
         db.retirer_element(c, lot[3]["id"], "evan")
-        vue = db.enregistrer_vue(c, {"nom": "LAMP", "definition":
-                                     {"roles": ["lamp"]}}, "evan")
+        tableau_de_bord = {
+            "roles": ["lamp"], "mode": "graphiques",
+            "colonnes": {"serveur": ["nom", "ram_pct", "vcpu_ratio"]},
+            "panneaux": [{"type": "figure", "figure": "ram", "largeur": 2},
+                         {"type": "barres", "niveau": "vm", "mesure": "ram",
+                          "groupe": "cluster", "top": 12, "largeur": 1}]}
+        vue = db.enregistrer_vue(c, {"nom": "LAMP", "definition": tableau_de_bord},
+                                 "evan")
         vues = db.lister_vues(c, "evan")
         r = db.rentabilite(c)
         journal = db.lire_journal(c)
     finally:
         c.close()
     egal(nouveau["code"], "serveur-node-js")
-    egal([v["nom"] for v in vues if v["id"] == vue["id"]], ["LAMP"])
+    egal([(v["nom"], v["definition"]) for v in vues if v["id"] == vue["id"]],
+         [("LAMP", tableau_de_bord)], "le tableau de bord revient tel quel")
 
     def trouve(cartes):
         for x in cartes:

@@ -411,10 +411,31 @@
     --viz-tendu:#fab219; --viz-critique:#d03b3b;
     --viz-grille:#e6e9ed; --viz-base:#b7bfc8; --viz-muet:#59636e;
   }
+  /* dense : un panneau demi-largeur vient combler le trou laisse a cote
+     d'un panneau pleine largeur, plutot que de laisser une colonne vide */
   .viz-mur { display:grid; grid-template-columns:repeat(auto-fit, minmax(380px, 1fr));
-             gap:14px; align-items:start; }
+             grid-auto-flow:dense; gap:14px; align-items:start; }
   /* la capacite liste tous les serveurs : pleine largeur, apres les autres */
   .viz.large { grid-column:1 / -1; }
+  /* tableau de bord en edition : on voit les cadres et ou ajouter */
+  .viz-mur.edition .viz { outline:1px dashed var(--trait2); outline-offset:3px; }
+  .pan-edition { display:flex; gap:4px; }
+  .pan-edition button { padding:2px 7px; font-size:11.5px; }
+  .viz-ajout { min-height:120px; border:1px dashed var(--trait2); border-radius:var(--r);
+               background:none; color:var(--accent); font:inherit; font-weight:600;
+               cursor:pointer; }
+  .viz-ajout:hover { background:var(--accent-doux); }
+  .chiffre-cle { padding:10px 2px 6px; }
+  .chiffre-cle b { display:block; font-size:30px; font-weight:650; line-height:1.15;
+                   font-variant-numeric:tabular-nums; }
+  .chiffre-cle span { color:var(--doux); font-size:12px; }
+  .liste-colonnes { list-style:none; margin:0; padding:0; max-height:55vh; overflow-y:auto;
+                    border:1px solid var(--trait); border-radius:7px; }
+  .liste-colonnes li { display:flex; align-items:center; gap:6px; padding:3px 8px;
+                       border-bottom:1px solid var(--trait); }
+  .liste-colonnes li:last-child { border-bottom:0; }
+  .liste-colonnes label.case { flex:1; }
+  .liste-colonnes button { padding:1px 7px; font-size:11px; }
   .viz { margin:0; background:var(--carte); border:1px solid var(--trait);
          border-radius:var(--r); padding:14px 16px 10px; min-width:0; }
   .viz figcaption { margin-bottom:8px; }
