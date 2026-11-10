@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="fr" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="__CSP__">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITRE__</title>
+<style>
+__STYLE__
+</style>
+</head>
+<body>
+
+<header>
+  <div class="marque">__TITRE__<small id="horodatage">—</small></div>
+  <div class="stats" id="stats"></div>
+  <div class="stats" id="stats-commerce"></div>
+  <div class="outils pousse">
+    <button id="btn-rent" hidden title="PA, CA, ROI et capacité, du cluster à l'élément déclaré">Rentabilité</button>
+    <input type="search" id="recherche" placeholder="Rechercher…" autocomplete="off">
+    <button id="btn-filtres" title="Afficher ou masquer les filtres">Filtres</button>
+    <button id="btn-plier" title="Replier tous les hyperviseurs">Replier</button>
+    <button id="btn-ajuster" title="Ajuster à l'écran">Ajuster</button>
+    <button id="btn-reinit" title="Réinitialiser positions et filtres">Réinitialiser</button>
+    <button id="btn-jeton" title="Obtenir un jeton pour le client">Jeton</button>
+    <button id="btn-recolte" hidden title="Jetons PVE de la récolte, hyperviseur par hyperviseur">Récolte</button>
+    <button id="btn-theme" title="Thème clair ou sombre">◐</button>
+    <div class="moi" id="moi" hidden></div>
+  </div>
+</header>
+<div class="session" id="session" role="alert" hidden>
+  Ta session a expiré : les chiffres affichés ne se mettent plus à jour.
+  <button id="session-reprendre">Se reconnecter</button>
+</div>
+
+<div class="filtres" id="filtres"></div>
+
+<div class="scene" id="scene">
+  <svg id="svg" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <pattern id="points" width="22" height="22" patternUnits="userSpaceOnUse">
+        <circle cx="1" cy="1" r="1" fill="currentColor" opacity=".10"/>
+      </pattern>
+    </defs>
+    <rect class="grille" x="-20000" y="-20000" width="40000" height="40000"
+          color="var(--doux)"/>
+    <g id="monde">
+      <g id="liens"></g>
+      <g id="noeuds"></g>
+    </g>
+  </svg>
+  <div class="vide" id="vide">Aucun élément ne correspond aux filtres.</div>
+  <div class="aide">Glisser une carte pour la déplacer · molette pour zoomer · clic pour les détails</div>
+  <aside class="fiche jeton" id="boite-jeton">
+    <button class="fermer" id="jeton-fermer">✕</button>
+    <h3>Jeton pour le client</h3>
+    <div class="type" id="jeton-etat">…</div>
+    <pre id="jeton-cmd"></pre>
+    <button id="jeton-copier">Copier la commande</button>
+    <p class="note" id="jeton-note"></p>
+  </aside>
+  <aside class="fiche" id="fiche">
+    <button class="fermer" id="fiche-fermer">✕</button>
+    <h3 id="fiche-titre"></h3>
+    <div class="type" id="fiche-type"></div>
+    <dl id="fiche-corps"></dl>
+    <div id="fiche-vente"></div>
+  </aside>
+</div>
+
+<section class="rent" id="vue-rent" aria-label="Rentabilité">
+  <div class="rent-vues" id="rent-vues" hidden>
+    <label for="rent-vue">Vue</label>
+    <select id="rent-vue"></select>
+    <span class="vue-modifiee" id="vue-modifiee" hidden
+          title="Les filtres ou la présentation ont changé depuis l’ouverture de la vue">modifiée</span>
+    <button id="vue-enregistrer">Enregistrer la vue…</button>
+    <button id="vue-supprimer" class="danger" hidden>Supprimer</button>
+    <span class="lecture" id="vue-auteur"></span>
+  </div>
+  <div class="kpis" id="rent-kpis"></div>
+  <div class="rent-outils">
+    <div class="segment" id="rent-modes" role="group" aria-label="Présentation">
+      <button data-mode="arbre" title="Cluster, serveurs, VM et éléments imbriqués">Arbre</button>
+      <button data-mode="tableau" title="Une ligne par carte, triable par colonne">Tableau</button>
+      <button data-mode="graphiques" title="Résultat, origine du chiffre, capacité, clients">Graphiques</button>
+    </div>
+    <input type="search" id="rent-recherche" class="seul-filtre" autocomplete="off"
+           placeholder="Filtrer : nom, contrat, client…">
+    <label class="puce seul-filtre"><input type="checkbox" id="rent-perte"> à perte</label>
+    <label class="puce seul-filtre"><input type="checkbox" id="rent-alertes"> avec alerte</label>
+    <button id="rent-btn-filtres" title="Clusters, datacenters, clients, rôles">Filtres</button>
+    <button id="rent-deplier" class="seul-arbre">Tout déplier</button>
+    <span class="pousse"></span>
+    <button id="rent-journal" title="Qui a saisi quoi, et quand">Journal</button>
+    <a class="bouton" id="rent-export" href="/api/export.csv" download
+       title="Tout l'arbre, une carte par ligne, pour Excel ou Calc">Exporter tout en CSV</a>
+    <button id="rent-export-vue" class="primaire seul-plat"
+            title="Les lignes et colonnes affichées, dans l'ordre du tri">Exporter cette vue</button>
+  </div>
+  <div class="rent-filtres filtres" id="rent-filtres" hidden></div>
+  <div class="rent-outils seul-plat">
+    <div class="segment" id="rent-niveaux" role="group" aria-label="Niveau">
+      <button data-niveau="cluster">Clusters</button>
+      <button data-niveau="serveur">Serveurs</button>
+      <button data-niveau="vm">VM</button>
+      <button data-niveau="element">Éléments</button>
+      <button data-niveau="tout">Tout</button>
+    </div>
+    <span class="lecture" id="plat-compte"></span>
+  </div>
+  <div class="rent-avert" id="rent-avert"></div>
+  <div class="table-defile seul-arbre">
+    <table class="arbre">
+      <thead><tr>
+        <th>Carte</th><th class="num">PA / mois</th><th class="num">CA / mois</th>
+        <th class="num">ROI / mois</th><th class="num">Marge</th>
+        <th>Capacité</th><th></th>
+      </tr></thead>
+      <tbody id="rent-corps"></tbody>
+    </table>
+  </div>
+  <div class="table-defile seul-plat">
+    <table class="arbre plat">
+      <thead id="plat-tete"></thead>
+      <tbody id="plat-corps"></tbody>
+      <tfoot id="plat-pied"></tfoot>
+    </table>
+  </div>
+  <div class="viz-mur seul-graph">
+    <figure class="viz">
+      <figcaption><b>Résultat par cluster</b>
+        <small>ROI mensuel, CA − PA. Un clic ouvre le cluster dans l’arbre.</small></figcaption>
+      <div class="viz-zone" id="viz-roi"></div>
+    </figure>
+    <figure class="viz">
+      <figcaption><b>Ce qui rentre, ce qui sort</b>
+        <small>Chiffre d’affaires et prix d’achat mensuels, par cluster.</small></figcaption>
+      <div class="viz-zone" id="viz-capa"></div>
+    </figure>
+    <figure class="viz">
+      <figcaption><b>Chiffre d’affaires par client</b>
+        <small>Contrats et éléments déclarés, ramenés au mois ; part du CA total.</small></figcaption>
+      <div class="viz-zone" id="viz-clients"></div>
+    </figure>
+    <figure class="viz large">
+      <figcaption><b>RAM allouée par serveur</b>
+        <small>En % de la RAM physique. ▲ au-delà de 85 % l’hôte est tendu, ⚠ au-delà de 100 % il est surréservé.</small></figcaption>
+      <div class="viz-zone" id="viz-ram"></div>
+    </figure>
+  </div>
+  <div class="vente rent-orph" id="rent-orphelins"></div>
+  <p class="rent-pied">
+    Chaque carte cumule ses enfants : PA = achat propre + achats des enfants,
+    CA = vente propre + ventes des enfants, ROI = CA − PA. Tout est ramené au
+    mois. ✎ signale une valeur corrigée à la main. Le ROI d’un serveur est une
+    photo : dans un cluster, les VM migrent d’un nœud à l’autre ; celui du
+    cluster est le chiffre stable.
+  </p>
+</section>
+<!-- le tiroir de saisie sert aux deux vues : la fiche d'un hyperviseur
+     dans le schema l'ouvre aussi, il ne vit donc pas dans #vue-rent -->
+<aside class="fiche tiroir" id="tiroir" aria-live="polite">
+  <button class="fermer" id="tiroir-fermer" title="Fermer">✕</button>
+  <h3 id="tiroir-titre"></h3>
+  <div class="type" id="tiroir-type"></div>
+  <div class="vente" id="tiroir-corps"></div>
+</aside>
+<div class="flash" id="flash" role="status" aria-live="polite"></div>
+<div class="viz-bulle" id="viz-bulle" role="tooltip" hidden></div>
+
+<script>
+__SCRIPT__
+</script>
+</body>
+</html>

@@ -92,6 +92,7 @@ from urllib.parse import parse_qs, urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import auth_locale  # noqa: E402
+import csp  # noqa: E402
 import depot_scelle  # noqa: E402
 import infra_inventory as orch  # noqa: E402
 import inventory_db  # noqa: E402
@@ -172,6 +173,53 @@ def consommer_jeton(conn, jeton, origine):
             return None, "jeton deja utilise"
     conn.commit()
     return ligne["emis_par"], None
+
+
+# --------------------------------------------------------------------------
+# Routes
+# --------------------------------------------------------------------------
+# Chaque route se declare par @route, avec ce qu'elle exige. L'aiguilleur
+# applique les controles avant d'appeler la fonction, dans cet ordre :
+#
+#   1. mode     une route du mode local n'existe pas en OIDC (404)
+#   2. origine  tout POST vient de la page elle-meme (meme_origine), sans
+#               exception : c'est la parade contre une page piegee qui
+#               ecrirait a la place d'un utilisateur connecte
+#   3. acces    public, identite, session, lecture, commercial, admin,
+#               jeton (le role d'emission, voir peut_emettre)
+#   4. corps    le JSON du corps, lu et passe a la fonction
+#
+# Une route ne refait donc aucun de ces controles elle-meme ; tests_web.py
+# verifie sur la table entiere qu'aucune n'y echappe.
+
+ACCES = ("public", "identite", "session", "lecture", "commercial", "admin",
+         "jeton")
+
+
+class Route:
+    __slots__ = ("methode", "chemin", "acces", "corps", "limite", "mode", "fn")
+
+    def __init__(self, methode, chemin, acces, corps, limite, mode, fn):
+        self.methode, self.chemin, self.acces = methode, chemin, acces
+        self.corps, self.limite, self.mode, self.fn = corps, limite, mode, fn
+
+
+ROUTES = {}
+
+
+def route(methode, chemin, acces, corps=False, limite=16384, mode=None):
+    if acces not in ACCES:
+        raise ValueError("acces inconnu : " + acces)
+    if corps and methode != "POST":
+        raise ValueError("un corps se lit sur un POST")
+
+    def decorateur(fn):
+        cle = (methode, chemin)
+        if cle in ROUTES:
+            raise ValueError("route declaree deux fois : {} {}".format(*cle))
+        ROUTES[cle] = Route(methode, chemin, acces, corps, limite, mode, fn)
+        return fn
+    return decorateur
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -436,60 +484,58 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
         return None, True
 
-    def ecriture_permise(self):
-        """Role, origine et corps : tout ce qu'une ecriture doit passer.
+    # -- aiguillage ---------------------------------------------------------
+    def do_GET(self):
+        self.aiguiller("GET")
 
-        Renvoie le corps JSON, ou None si une reponse d'erreur est partie.
-        """
-        if not self.meme_origine():
-            self.log_message("ecriture refusee : requete d'un autre site")
-            self.repondre(403, {"erreur": "requete d'une autre origine"})
-            return None
-        peut, motif = self.peut_vendre()
-        if not peut:
-            code = 401 if motif == "identite absente" else 403
-            self.repondre(code, {"erreur": motif})
-            return None
-        charge, erreur = self.corps_json()
-        if erreur:
-            self.repondre(400, {"erreur": erreur})
-            return None
-        return charge
-
-    # -- routes ------------------------------------------------------------
     def do_POST(self):
-        route = self.path.split("?")[0].rstrip("/")
-        session = {
-            "/api/connexion": self.connexion,
-            "/api/deconnexion": self.deconnexion,
-            "/api/mot-de-passe": self.changer_mdp,
-        }
-        if route in session:
-            if not self.mode_local():
-                return self.repondre(404, {"erreur": "route inconnue"})
-            return session[route]()
-        if route == "/api/recolte/jeton":
-            return self.deposer_jeton()
-        ecritures = {
-            "/api/commercial": self.enregistrer_vente,
-            "/api/commercial/resilier": self.resilier_vente,
-            "/api/element": self.enregistrer_element,
-            "/api/element/retirer": self.retirer_element,
-            "/api/elements": self.enregistrer_elements,
-            "/api/role": self.poser_role,
-            "/api/roles": self.creer_role,
-            "/api/surcharge": self.poser_surcharge,
-            "/api/vues": self.enregistrer_vue,
-            "/api/vues/retirer": self.retirer_vue,
-        }
-        if route in ecritures:
-            return ecritures[route]()
-        if route != "/api/token":
+        self.aiguiller("POST")
+
+    def aiguiller(self, methode):
+        chemin = self.path.split("?")[0].rstrip("/") or "/"
+        r = ROUTES.get((methode, chemin))
+        if r is None or (r.mode == "local" and not self.mode_local()):
             return self.repondre(404, {"erreur": "route inconnue"})
-        if not self.meme_origine():
+        if methode == "POST" and not self.meme_origine():
+            self.log_message("%s %s refuse : requete d'un autre site",
+                             methode, chemin)
             return self.repondre(403, {"erreur": "requete d'une autre origine"})
-        if not self.exiger(self.peut_emettre()):
+        if not self.acces_permis(r.acces):
             return
+        if not r.corps:
+            return r.fn(self)
+        charge, erreur = self.corps_json(r.limite)
+        if erreur:
+            return self.repondre(400, {"erreur": erreur})
+        return r.fn(self, charge)
+
+    def acces_permis(self, acces):
+        """Vrai si la requete passe ; sinon la reponse d'erreur est partie."""
+        if acces == "public":
+            return True
+        if acces == "session":
+            if self.compte_local():
+                return True
+            self.repondre(401, {"erreur": "session absente ou expiree"})
+            return False
+        if acces == "identite":
+            if self.identite():
+                return True
+            self.repondre(401, {"erreur": "identite absente"})
+            return False
+        if acces == "commercial":
+            # peut_vendre dit pourquoi : aucun commercial declare n'est pas
+            # la meme chose que ne pas en etre un
+            peut, motif = self.peut_vendre()
+            if not peut:
+                self.repondre(401 if motif == "identite absente" else 403,
+                              {"erreur": motif})
+            return peut
+        role = self.peut_emettre() if acces == "jeton" else acces
+        return self.exiger(role)
+
+    @route("POST", "/api/token", "jeton")
+    def emettre_jeton_client(self):
         utilisateur = self.identite()
         res, echec = self.lire(lambda c: emettre_jeton(c, utilisateur))
         if echec:
@@ -501,32 +547,6 @@ class Handler(BaseHTTPRequestHandler):
             "usage": "une seule fois",
         })
 
-    def do_GET(self):
-        route = self.path.split("?")[0].rstrip("/")
-        if route == "/api/sante":
-            return self.sante()
-        if route == "/api/inventaire":
-            return self.inventaire()
-        if route == "/api/rentabilite":
-            return self.rentabilite()
-        if route == "/api/export.csv":
-            return self.exporter_csv()
-        if route == "/api/journal":
-            return self.journal()
-        if route == "/api/moi":
-            return self.moi()
-        if route == "/api/vues":
-            return self.lister_vues()
-        if route == "/api/recolte":
-            return self.recolte()
-        if route == "/api/commercial":
-            return self.lister_ventes()
-        if route == "/connexion" and self.mode_local():
-            return self.servir_connexion()
-        if route in ("", "/index.html") and self.page:
-            return self.servir_page()
-        return self.repondre(404, {"erreur": "route inconnue"})
-
     def rediriger(self, cible):
         self.send_response(303)
         self.send_header("Location", cible)
@@ -535,14 +555,18 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(k, v)
         self.end_headers()
 
+    @route("GET", "/connexion", "public", mode="local")
     def servir_connexion(self):
         try:
             corps = PAGE_CONNEXION.read_bytes()
         except OSError as exc:
             self.log_message("page de connexion illisible : %s", pour_journal(exc))
             return self.repondre(503, {"erreur": "page de connexion illisible"})
+        # par empreintes : la page de connexion recoit des mots de passe, pas
+        # de 'unsafe-inline' sur elle
         self.envoyer(200, corps, "text/html; charset=utf-8",
-                     {"Content-Security-Policy": CSP_PAGE,
+                     {"Content-Security-Policy": csp.politique(
+                         corps.decode("utf-8"), cadre=True),
                       "X-Frame-Options": "DENY"})
 
     # -- session locale ----------------------------------------------------
@@ -571,12 +595,8 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
         return None, True
 
-    def connexion(self):
-        if not self.meme_origine():
-            return self.repondre(403, {"erreur": "requete d'une autre origine"})
-        charge, erreur = self.corps_json(limite=2048)
-        if erreur:
-            return self.repondre(400, {"erreur": erreur})
+    @route("POST", "/api/connexion", "public", corps=True, limite=2048, mode="local")
+    def connexion(self, charge):
         login = charge.get("login") if isinstance(charge.get("login"), str) else ""
         mdp = (charge.get("mot_de_passe")
                if isinstance(charge.get("mot_de_passe"), str) else "")
@@ -596,9 +616,8 @@ class Handler(BaseHTTPRequestHandler):
             "application/json; charset=utf-8",
             self.poser_cookie(jeton, int(auth_locale.DUREE_MAX.total_seconds())))
 
+    @route("POST", "/api/deconnexion", "public", mode="local")
     def deconnexion(self):
-        if not self.meme_origine():
-            return self.repondre(403, {"erreur": "requete d'une autre origine"})
         compte, jeton = self.compte_local(), self.jeton_session()
         if compte:
             _, echec = self.avec_base(
@@ -609,15 +628,9 @@ class Handler(BaseHTTPRequestHandler):
         self.envoyer(200, b'{"deconnecte": true}', "application/json; charset=utf-8",
                      self.poser_cookie("", 0))
 
-    def changer_mdp(self):
-        if not self.meme_origine():
-            return self.repondre(403, {"erreur": "requete d'une autre origine"})
+    @route("POST", "/api/mot-de-passe", "session", corps=True, limite=2048, mode="local")
+    def changer_mdp(self, charge):
         compte = self.compte_local()
-        if not compte:
-            return self.repondre(401, {"erreur": "session absente ou expiree"})
-        charge, erreur = self.corps_json(limite=2048)
-        if erreur:
-            return self.repondre(400, {"erreur": erreur})
         actuel, nouveau = charge.get("actuel"), charge.get("nouveau")
         if not (isinstance(actuel, str) and isinstance(nouveau, str)):
             return self.repondre(400, {"erreur": "actuel et nouveau attendus"})
@@ -629,6 +642,8 @@ class Handler(BaseHTTPRequestHandler):
         self.log_message("mot de passe change : %s", pour_journal(compte["login"]))
         self.repondre(200, {"change": True})
 
+    @route("GET", "/", "public")
+    @route("GET", "/index.html", "public")
     def servir_page(self):
         """Sert le schema.
 
@@ -637,6 +652,8 @@ class Handler(BaseHTTPRequestHandler):
         seulement a une session ouverte : la page cartographie
         l'infrastructure et porte les prix.
         """
+        if not self.page:
+            return self.repondre(404, {"erreur": "route inconnue"})
         if self.mode_local():
             c = self.compte_local()
             if not c or "lecture" not in c["roles"]:
@@ -654,10 +671,9 @@ class Handler(BaseHTTPRequestHandler):
     def requete(self):
         return parse_qs(urlparse(self.path).query)
 
+    @route("GET", "/api/commercial", "lecture")
     def lister_ventes(self):
         """Les ventes, toutes ou celles d'une VM."""
-        if not self.exiger("lecture"):
-            return
         q = self.requete()
         vm = (q.get("vm") or [None])[0]
         toutes = (q.get("toutes") or ["0"])[0] in ("1", "true", "oui")
@@ -668,11 +684,9 @@ class Handler(BaseHTTPRequestHandler):
         peut, _ = self.peut_vendre()
         self.repondre(200, {"ventes": ventes, "peut_ecrire": peut})
 
-    def enregistrer_vente(self):
+    @route("POST", "/api/commercial", "commercial", corps=True)
+    def enregistrer_vente(self, charge):
         """Cree ou corrige une vente. Reserve aux comptes declares."""
-        charge = self.ecriture_permise()
-        if charge is None:
-            return
 
         # On controle la saisie avant d'ouvrir la base : une ligne refusee ne
         # doit pas couter une connexion, et le commercial doit lire "prix
@@ -699,10 +713,8 @@ class Handler(BaseHTTPRequestHandler):
                                  if k != "cree"},
                        "par": utilisateur})
 
-    def resilier_vente(self):
-        charge = self.ecriture_permise()
-        if charge is None:
-            return
+    @route("POST", "/api/commercial/resilier", "commercial", corps=True)
+    def resilier_vente(self, charge):
         utilisateur = self.identite()
         touche, echec = self.lire(lambda c: inventory_db.desactiver_vente(
             c, charge.get("contrat"), utilisateur))
@@ -716,10 +728,8 @@ class Handler(BaseHTTPRequestHandler):
         self.repondre(200, {"resilie": True, "par": utilisateur})
 
     # -- elements et corrections ---------------------------------------------
-    def enregistrer_element(self):
-        charge = self.ecriture_permise()
-        if charge is None:
-            return
+    @route("POST", "/api/element", "commercial", corps=True)
+    def enregistrer_element(self, charge):
         utilisateur = self.identite()
         e, echec = self.lire(
             lambda c: inventory_db.enregistrer_element(c, charge, utilisateur))
@@ -733,10 +743,8 @@ class Handler(BaseHTTPRequestHandler):
         self.repondre(201 if e["cree"] else 200,
                       {"enregistre": True, "element": e, "par": utilisateur})
 
-    def enregistrer_elements(self):
-        charge = self.ecriture_permise()
-        if charge is None:
-            return
+    @route("POST", "/api/elements", "commercial", corps=True)
+    def enregistrer_elements(self, charge):
         utilisateur = self.identite()
         lot, echec = self.lire(
             lambda c: inventory_db.enregistrer_elements(c, charge, utilisateur))
@@ -749,10 +757,8 @@ class Handler(BaseHTTPRequestHandler):
         self.repondre(201, {"enregistre": True, "elements": lot,
                             "par": utilisateur})
 
-    def poser_role(self):
-        charge = self.ecriture_permise()
-        if charge is None:
-            return
+    @route("POST", "/api/role", "commercial", corps=True)
+    def poser_role(self, charge):
         utilisateur = self.identite()
         a, echec = self.lire(
             lambda c: inventory_db.poser_role(c, charge, utilisateur))
@@ -763,10 +769,8 @@ class Handler(BaseHTTPRequestHandler):
                          pour_journal(a["role"]))
         self.repondre(200, {"enregistre": True, "role": a, "par": utilisateur})
 
-    def creer_role(self):
-        charge = self.ecriture_permise()
-        if charge is None:
-            return
+    @route("POST", "/api/roles", "commercial", corps=True)
+    def creer_role(self, charge):
         utilisateur = self.identite()
         r, echec = self.lire(
             lambda c: inventory_db.creer_role(c, charge, utilisateur))
@@ -776,10 +780,8 @@ class Handler(BaseHTTPRequestHandler):
                          pour_journal(utilisateur), pour_journal(r["code"]))
         self.repondre(201, {"enregistre": True, "role": r, "par": utilisateur})
 
-    def retirer_element(self):
-        charge = self.ecriture_permise()
-        if charge is None:
-            return
+    @route("POST", "/api/element/retirer", "commercial", corps=True)
+    def retirer_element(self, charge):
         utilisateur = self.identite()
         touche, echec = self.lire(lambda c: inventory_db.retirer_element(
             c, charge.get("id"), utilisateur))
@@ -792,10 +794,8 @@ class Handler(BaseHTTPRequestHandler):
                          pour_journal(utilisateur), pour_journal(charge.get("id")))
         self.repondre(200, {"retire": True, "par": utilisateur})
 
-    def poser_surcharge(self):
-        charge = self.ecriture_permise()
-        if charge is None:
-            return
+    @route("POST", "/api/surcharge", "commercial", corps=True)
+    def poser_surcharge(self, charge):
         utilisateur = self.identite()
         s, echec = self.lire(
             lambda c: inventory_db.poser_surcharge(c, charge, utilisateur))
@@ -809,13 +809,12 @@ class Handler(BaseHTTPRequestHandler):
                             "par": utilisateur})
 
     # -- recolte PVE : etat par hyperviseur, depot de jetons -----------------
+    @route("GET", "/api/recolte", "admin")
     def recolte(self):
         """Chaque dedie du dernier snapshot : sonde ou non, joignable ou non,
         d'ou vient son jeton, et ou en est son dernier depot. Le service ne
         sait pas si un jeton est en base — il n'a pas acces a secret_store —,
         il sait ce qui a ete depose et ce que la collecte en a fait."""
-        if not self.exiger("admin"):
-            return
 
         def lire(conn):
             return (inventory_db.load_latest(conn),
@@ -854,14 +853,8 @@ class Handler(BaseHTTPRequestHandler):
                             "genere_le": data.get("generated_at"),
                             "hotes": hotes})
 
-    def deposer_jeton(self):
-        if not self.meme_origine():
-            return self.repondre(403, {"erreur": "requete d'une autre origine"})
-        if not self.exiger("admin"):
-            return
-        charge, erreur = self.corps_json(limite=8192)
-        if erreur:
-            return self.repondre(400, {"erreur": erreur})
+    @route("POST", "/api/recolte/jeton", "admin", corps=True, limite=8192)
+    def deposer_jeton(self, charge):
         utilisateur = self.identite()
 
         def faire(conn):
@@ -881,10 +874,9 @@ class Handler(BaseHTTPRequestHandler):
         self.repondre(201, {"depose": n, "hotes": hotes})
 
     # -- lectures ------------------------------------------------------------
+    @route("GET", "/api/rentabilite", "lecture")
     def rentabilite(self):
         """L'arbre de rentabilite : cluster > serveur > VM > elements."""
-        if not self.exiger("lecture"):
-            return
         res, echec = self.lire(inventory_db.rentabilite)
         if echec:
             return
@@ -892,10 +884,9 @@ class Handler(BaseHTTPRequestHandler):
         res["peut_ecrire"] = peut
         self.repondre(200, res)
 
+    @route("GET", "/api/export.csv", "lecture")
     def exporter_csv(self):
         """Le meme arbre, a plat. Telecharge, jamais affiche dans l'onglet."""
-        if not self.exiger("lecture"):
-            return
         utilisateur = self.identite()
         res, echec = self.lire(inventory_db.rentabilite)
         if echec:
@@ -907,24 +898,8 @@ class Handler(BaseHTTPRequestHandler):
                       'attachment; filename="{}"'.format(nom)})
 
     # -- vues enregistrees ----------------------------------------------------
-    # Une vue n'est qu'un filtre nomme : tout lecteur en cree. La modifier ou
-    # la retirer revient a son auteur, ou a un admin.
-    def ecriture_vue(self):
-        """Comme ecriture_permise(), mais le role lecture suffit."""
-        if not self.meme_origine():
-            self.repondre(403, {"erreur": "requete d'une autre origine"})
-            return None
-        if not self.exiger("lecture"):
-            return None
-        charge, erreur = self.corps_json()
-        if erreur:
-            self.repondre(400, {"erreur": erreur})
-            return None
-        return charge
-
+    @route("GET", "/api/vues", "lecture")
     def lister_vues(self):
-        if not self.exiger("lecture"):
-            return
         moi = self.identite()
         vues, echec = self.lire(lambda c: inventory_db.lister_vues(c, moi))
         if echec:
@@ -934,10 +909,8 @@ class Handler(BaseHTTPRequestHandler):
             v["modifiable"] = admin or v["cree_par"] == moi
         self.repondre(200, {"vues": vues})
 
-    def enregistrer_vue(self):
-        charge = self.ecriture_vue()
-        if charge is None:
-            return
+    @route("POST", "/api/vues", "lecture", corps=True)
+    def enregistrer_vue(self, charge):
         moi, admin = self.identite(), "admin" in self.roles()
         v, echec = self.lire(
             lambda c: inventory_db.enregistrer_vue(c, charge, moi, admin))
@@ -949,10 +922,8 @@ class Handler(BaseHTTPRequestHandler):
         v["modifiable"] = True
         self.repondre(201 if v["cree"] else 200, {"vue": v})
 
-    def retirer_vue(self):
-        charge = self.ecriture_vue()
-        if charge is None:
-            return
+    @route("POST", "/api/vues/retirer", "lecture", corps=True)
+    def retirer_vue(self, charge):
         moi, admin = self.identite(), "admin" in self.roles()
         _, echec = self.lire(lambda c: inventory_db.retirer_vue(
             c, charge.get("id"), moi, admin))
@@ -962,6 +933,7 @@ class Handler(BaseHTTPRequestHandler):
                          pour_journal(charge.get("id")))
         self.repondre(200, {"retiree": True})
 
+    @route("GET", "/api/moi", "identite")
     def moi(self):
         """Qui suis-je, pour le service. Sert a la page (nom, roles,
         deconnexion) et a verifier la chaine OIDC de bout en bout."""
@@ -989,14 +961,14 @@ class Handler(BaseHTTPRequestHandler):
             "deconnexion": None if self.en_dev() else retour + "?logout=",
         })
 
+    @route("GET", "/api/journal", "lecture")
     def journal(self):
-        if not self.exiger("lecture"):
-            return
         lignes, echec = self.lire(inventory_db.lire_journal)
         if echec:
             return
         self.repondre(200, {"journal": lignes})
 
+    @route("GET", "/api/sante", "public")
     def sante(self):
         """Sans authentification : l'etat, jamais le detail.
 
@@ -1031,6 +1003,7 @@ class Handler(BaseHTTPRequestHandler):
             "serveurs": len(data["servers"]), "invites": len(data["guests"]),
         })
 
+    @route("GET", "/api/inventaire", "public")
     def inventaire(self):
         entete = self.headers.get("Authorization") or ""
         jeton = entete[7:].strip() if entete.lower().startswith("bearer ") else ""

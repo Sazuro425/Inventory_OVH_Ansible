@@ -479,9 +479,16 @@ rendu prend 21 ms. Au-delà de 60 invités, la page s'ouvre repliée au niveau d
 hyperviseurs, sinon elle ferait plusieurs milliers de pixels de haut ; et
 l'ajustement ne descend jamais sous un zoom lisible.
 
-Le gabarit (HTML, CSS et JS) est dans `assets/topologie.tmpl.html` ; `topologie.py`
-n'y injecte que les données. Pour changer l'allure, c'est le gabarit qu'il faut
-modifier, pas le script.
+Les sources de la page sont dans `assets/page/` : le squelette `page.html`,
+`style.css`, et un fichier JavaScript par domaine dans `js/` (carte,
+rentabilité, tableau, graphiques, filtres et vues, saisies, récolte…).
+`topologie.py` les assemble en une page unique, autonome, et n'y injecte que
+les données. Pour changer l'allure ou le comportement, ce sont ces sources
+qu'il faut modifier, pas le script Python.
+
+La page porte sa propre politique de sécurité (balise `<meta>`) : son script
+et son style sont autorisés par leur empreinte SHA-256 (`csp.py`), sans
+`'unsafe-inline'`.
 
 Régénérer le schéma après chaque collecte suffit à le garder à jour ; ajoute la
 commande à la fin de `deploy/collecte.sh` pour qu'il se rafraîchisse tout seul.

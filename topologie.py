@@ -29,10 +29,24 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import bastion_diff as bdiff  # noqa: E402
+import csp  # noqa: E402
 import infra_inventory as orch  # noqa: E402
 import inventory_db  # noqa: E402
 
-GABARIT = Path(__file__).resolve().parent / "assets" / "topologie.tmpl.html"
+# Les sources de la page, par domaine : assets/page/page.html (le squelette),
+# style.css, et js/*.js concatenes dans l'ordre de leur nom. Un seul fichier
+# en sort, autonome : il est servi tel quel et s'ouvre aussi hors ligne, ce
+# que des modules JavaScript charges a part ne permettraient pas.
+SOURCES_PAGE = Path(__file__).resolve().parent / "assets" / "page"
+
+
+def gabarit():
+    """La page assemblee, avec __DATA__ et __TITRE__ encore a remplacer."""
+    page = (SOURCES_PAGE / "page.html").read_text(encoding="utf-8")
+    style = (SOURCES_PAGE / "style.css").read_text(encoding="utf-8")
+    script = "".join(f.read_text(encoding="utf-8")
+                     for f in sorted((SOURCES_PAGE / "js").glob("*.js")))
+    return page.replace("__STYLE__\n", style, 1).replace("__SCRIPT__\n", script, 1)
 
 COULEUR_ETAT = {
     "running": "var(--vert)",
@@ -468,7 +482,7 @@ def rendre(data, titre, acces=None, conf=None):
         # cle de stockage : les positions suivent le parc, pas le snapshot
         "cle": "infra",
     }
-    gabarit = GABARIT.read_text(encoding="utf-8")
+    modele = gabarit()
     json_charge = json.dumps(charge, ensure_ascii=False, separators=(",", ":"))
     # Un nom de VM contenant </script> fermerait la balise, et <!-- y
     # ouvrirait un etat ou le parseur HTML ne voit plus la fin du script.
@@ -478,8 +492,10 @@ def rendre(data, titre, acces=None, conf=None):
     # le titre vient de la ligne de commande, mais il atterrit dans du HTML ;
     # les donnees passent en premier, pour qu'un titre contenant __DATA__
     # ne soit pas remplace a son tour
-    return (gabarit.replace("__DATA__", json_charge)
-                   .replace("__TITRE__", html.escape(titre)))
+    page = (modele.replace("__DATA__", json_charge)
+                  .replace("__TITRE__", html.escape(titre)))
+    # en dernier : l'empreinte porte sur le script final, donnees comprises
+    return page.replace("__CSP__", csp.politique(page), 1)
 
 
 def ecrire_atomique(cible, contenu):
@@ -517,8 +533,9 @@ def main():
     ap.add_argument("--workers", type=int, default=10)
     args = ap.parse_args()
 
-    if not GABARIT.is_file():
-        print("gabarit introuvable : " + str(GABARIT), file=sys.stderr)
+    if not (SOURCES_PAGE / "page.html").is_file():
+        print("sources de la page introuvables : " + str(SOURCES_PAGE),
+              file=sys.stderr)
         return 1
 
     conf = orch.load_config(args.config)

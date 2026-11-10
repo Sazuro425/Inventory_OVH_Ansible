@@ -134,6 +134,89 @@ def _():
 
 
 # --------------------------------------------------------------------------
+# La table des routes : la politique d'acces, verifiee sur toutes a la fois
+# --------------------------------------------------------------------------
+
+# Les seules routes ouvertes sans identite, et pourquoi.
+PUBLIQUES = {
+    ("GET", "/api/sante"),        # supervision : l'etat, jamais le detail
+    ("GET", "/api/inventaire"),   # le client Ansible : jeton a usage unique
+    ("GET", "/"), ("GET", "/index.html"),   # la page controle sa session
+    ("GET", "/connexion"), ("POST", "/api/connexion"),   # mode local
+    ("POST", "/api/deconnexion"),
+}
+
+
+@test("routes : seules les routes listees ici sont publiques")
+def _():
+    ouvertes = {k for k, r in web.ROUTES.items() if r.acces == "public"}
+    egal(ouvertes, PUBLIQUES)
+
+
+@test("routes : toute ecriture passe par un role, jamais en public")
+def _():
+    for (methode, chemin), r in web.ROUTES.items():
+        if methode == "POST" and (methode, chemin) not in PUBLIQUES:
+            egal(r.acces in ("lecture", "commercial", "admin", "jeton",
+                             "session"), True, chemin)
+
+
+class Reponse(Exception):
+    pass
+
+
+def appel(methode, chemin, entetes=None, conf=CONF, dev_user=None):
+    """Passe une requete par l'aiguilleur ; rend (code, corps)."""
+    h = requete(entetes, conf=conf, dev_user=dev_user)
+    h.path = chemin
+    h.client_address = ("127.0.0.1", 0)
+
+    def repondre(code, charge):
+        raise Reponse((code, charge))
+    h.repondre = repondre
+    h.log_message = lambda *a: None
+    try:
+        h.aiguiller(methode)
+    except Reponse as r:
+        return r.args[0]
+    raise AssertionError("aucune reponse")
+
+
+@test("aiguilleur : route inconnue, ou du mode local en OIDC, rend 404")
+def _():
+    egal(appel("GET", "/api/rien")[0], 404)
+    egal(appel("POST", "/api/connexion")[0], 404, "connexion locale en OIDC")
+
+
+@test("aiguilleur : un POST d'un autre site est refuse avant tout")
+def _():
+    for chemin in ("/api/element", "/api/token", "/api/recolte/jeton"):
+        code, _ = appel("POST", chemin, {"Sec-Fetch-Site": "cross-site",
+                                         "X-Remote-User": "bob",
+                                         "X-Remote-Groups": "inventaire-admin"})
+        egal(code, 403, chemin)
+
+
+@test("aiguilleur : sans identite 401, sans le role 403")
+def _():
+    egal(appel("GET", "/api/rentabilite")[0], 401)
+    lecteur = {"X-Remote-User": "alice", "X-Remote-Groups": "inventaire-lecture",
+               "Sec-Fetch-Site": "same-origin"}
+    egal(appel("POST", "/api/element", lecteur)[0], 403, "ecrire sans commercial")
+    egal(appel("GET", "/api/recolte", lecteur)[0], 403, "recolte sans admin")
+    egal(appel("POST", "/api/token", lecteur)[0], 403, "jeton sans admin")
+
+
+@test("aiguilleur : un corps qui n'est pas du JSON est refuse (400)")
+def _():
+    commercial = {"X-Remote-User": "bob", "X-Remote-Groups": "inventaire-commercial",
+                  "Sec-Fetch-Site": "same-origin",
+                  "Content-Type": "application/x-www-form-urlencoded",
+                  "Content-Length": "3"}
+    egal(appel("POST", "/api/element", commercial)[0], 400)
+
+
+# --------------------------------------------------------------------------
 # Vues enregistrees : ce qui entre en base sera rejoue par la page
 # --------------------------------------------------------------------------
 
@@ -465,6 +548,27 @@ def _():
                             "prix_vente": "10"})["vm_ref"], None, "sans reference")
     for mauvais in ("web", "prod-1/abc", "a/1/2", "prod 1/5", "/5"):
         refuse(db.verifier_ref_vm, mauvais)
+
+
+@test("la page porte sa CSP : script et style par empreinte, sans unsafe-inline")
+def _():
+    import re
+    import csp
+    import generer_demo
+    import topologie
+    data = generer_demo.generer(4, 1, 3, 7, 0.5, 0.0, 0.1, 0.0)
+    page = topologie.rendre(data, "Essai </script><script>alert(1)</script>")
+    egal(page.count("<script>"), 1, "le titre piege ne cree pas de script")
+    egal(re.search(r"__[A-Z]+__", page.split("<script>")[0]), None,
+         "plus aucun marqueur dans l'en-tete")
+    meta = re.search(r'http-equiv="Content-Security-Policy" content="([^"]+)"', page)
+    egal(meta is not None, True, "balise meta presente")
+    politique = meta.group(1)
+    egal("unsafe-inline" in politique, False)
+    script = re.search(r"<script>(.*?)</script>", page, re.S).group(1)
+    style = re.search(r"<style>(.*?)</style>", page, re.S).group(1)
+    egal(csp.empreinte(script) in politique, True, "empreinte du script")
+    egal(csp.empreinte(style) in politique, True, "empreinte du style")
 
 
 @test("migrations : nommees NNNN_nom.sql, a partir de 0002, sans doublon")
