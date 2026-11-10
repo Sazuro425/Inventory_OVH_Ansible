@@ -228,6 +228,67 @@ def _():
 
 
 # --------------------------------------------------------------------------
+# Identite des VM : cluster/vmid (migration 0002)
+# --------------------------------------------------------------------------
+
+def deux_homonymes(nom_alpha="web", nom_beta="web"):
+    return {"servers": [serveur(1), serveur(2)],
+            "probes": [sonde(1, "alpha", "a1"), sonde(2, "beta", "b1")],
+            "guests": [invite(nom_alpha, 100, "alpha", "a1", 1),
+                       invite(nom_beta, 100, "beta", "b1", 2)],
+            "costs": [cout(1, 0), cout(2, 0)]}
+
+
+@test("la carte d'une VM a pour cle cluster/vmid, le nom reste son libelle")
+def _():
+    r = R.calculer(deux_homonymes())
+    a = trouve(r["arbre"], "alpha", "ns1.eu", "web")
+    egal((a["cle"], a["nom"]), ("alpha/100", "web"))
+    egal(trouve(r["arbre"], "beta", "ns2.eu", "web")["cle"], "beta/100")
+
+
+@test("par reference, deux homonymes ont chacun leur vente, role, correction")
+def _():
+    v = dict(vente("web", 30, "X"), vm_ref="beta/100")
+    r = R.calculer(deux_homonymes(), [v],
+                   [element(1, "vm", "beta/100", "site.fr", pv=10)],
+                   [correction("vm", "beta/100", "prix_achat", "4")],
+                   roles=[role("vm", "alpha/100", "lamp"),
+                          role("vm", "beta/100", "proxy")],
+                   catalogue=CATALOGUE)
+    a = trouve(r["arbre"], "alpha", "ns1.eu", "web")
+    b = trouve(r["arbre"], "beta", "ns2.eu", "web")
+    egal((a["pv"], b["pv"]), (0.0, 40.0), "la vente et le site vont a beta")
+    egal((a["pa"], b["pa"]), (0.0, 4.0), "la correction aussi")
+    egal((a["infos"]["role"], b["infos"]["role"]), ("lamp", "proxy"))
+
+
+@test("une VM renommee garde ses ventes, enfants, role et correction")
+def _():
+    saisies = dict(
+        ventes=[dict(vente("ancien-nom", 30, "X"), vm_ref="alpha/100")],
+        elements=[element(1, "vm", "alpha/100", "site.fr", pv=10)],
+        surcharges=[correction("vm", "alpha/100", "prix_achat", "4")],
+        roles=[role("vm", "alpha/100", "lamp")], catalogue=CATALOGUE)
+    r = R.calculer(deux_homonymes(nom_alpha="nouveau-nom"), **saisies)
+    a = trouve(r["arbre"], "alpha", "ns1.eu", "nouveau-nom")
+    egal((a["pv"], a["pa"], a["infos"]["role"]), (40.0, 4.0, "lamp"))
+    egal(r["orphelins"], [], "rien ne part hors parc")
+
+
+@test("une reference qui ne mene plus a rien : visible, jamais perdue")
+def _():
+    r = R.calculer(deux_homonymes(),
+                   [dict(vente("web", 30, "X"), vm_ref="gamma/7")],
+                   [element(1, "vm", "gamma/7", "site.fr", pv=10)],
+                   [correction("vm", "gamma/7", "prix_achat", "4")])
+    egal(sorted(o["genre"] for o in r["orphelins"]), ["contrat", "élément"])
+    egal(r["globale"]["pv"], 40.0, "toujours compte dans le total")
+    egal(any("ne visent plus aucune VM" in x for x in r["globale"]["alertes"]),
+         True, "la correction orpheline est signalee")
+
+
+# --------------------------------------------------------------------------
 # Enfants declares
 # --------------------------------------------------------------------------
 

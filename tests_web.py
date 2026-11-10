@@ -454,6 +454,19 @@ def _():
          "le depot illisible n'est meme pas teste")
 
 
+@test("une vente designe sa VM par cluster/vmid, le nom en libelle")
+def _():
+    v = db.verifier_vente({"vm_name": "web", "vm_ref": "prod-1/105",
+                           "contrat": "C1", "prix_vente": "10"})
+    egal((v["vm_name"], v["vm_ref"]), ("web", "prod-1/105"))
+    egal(db.verifier_ref_vm("standalone:ns1.ip-1-2-3.eu/100"),
+         "standalone:ns1.ip-1-2-3.eu/100")
+    egal(db.verifier_vente({"vm_name": "web", "contrat": "C1",
+                            "prix_vente": "10"})["vm_ref"], None, "sans reference")
+    for mauvais in ("web", "prod-1/abc", "a/1/2", "prod 1/5", "/5"):
+        refuse(db.verifier_ref_vm, mauvais)
+
+
 @test("migrations : nommees NNNN_nom.sql, a partir de 0002, sans doublon")
 def _():
     import tempfile

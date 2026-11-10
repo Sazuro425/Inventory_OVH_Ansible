@@ -399,6 +399,18 @@ def hote_des_invites(probes, guests):
             for g in guests}
 
 
+def ref_vm(g):
+    """La reference stable d'un invite : "cluster/vmid".
+
+    Un vmid est unique dans son cluster ; un noeud seul a pour cluster
+    "standalone:<hote>" (probe_cluster). La reference survit a un
+    renommage et a une migration de noeud, ce que le nom ne fait pas. Un nom
+    de VM ne contient jamais "/" : une valeur sans "/" est un nom.
+    """
+    cluster = g.get("cluster") or "standalone:{}".format(g.get("via_host") or "?")
+    return "{}/{}".format(cluster, g.get("vmid"))
+
+
 def collect_cluster(conf, probe, detail):
     host = probe["host"]
     try:

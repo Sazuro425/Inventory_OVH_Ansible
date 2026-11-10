@@ -521,6 +521,15 @@ declares. Pour un commercial, trois boutons :
 
 Les memes saisies existent dans l'arbre de la vue Rentabilite.
 
+**Comment une VM est designee.** Par sa reference `cluster/vmid` (`prod-1/105`,
+`standalone:ns1.eu/100` pour un noeud seul), pas par son nom : une VM
+renommee garde ses ventes, ses enfants, son role et ses corrections, et deux
+VM homonymes dans deux clusters ne se melangent plus. Une saisie qui ne mene
+plus a aucune VM (supprimee, ou restauree sous un autre vmid) n'est jamais
+perdue : elle part « hors parc », ou en alerte pour une correction. Les
+saisies faites par nom avant la migration 0002 sont converties quand le nom
+est unique, et restent lues par leur nom sinon.
+
 **Les roles** forment un catalogue (table `role`), pre-rempli par le schema :
 serveur web, LAMP, proxy, applicatif, base de donnees, messagerie, DNS,
 stockage, sauvegarde, supervision, site, vhost, domaine, licence, IP. Un

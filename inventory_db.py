@@ -584,8 +584,25 @@ def journaliser(cur, par, action, cible, avant=None, apres=None):
         (dt.datetime.now(), par, action, cible[:300], _js(avant), _js(apres)))
 
 
+_REF_VM = re.compile(r"^[A-Za-z0-9._:-]{1,160}/\d{1,9}$")
+
+
+def verifier_ref_vm(ref):
+    """Une reference cluster/vmid, ou None. Voir infra_inventory.ref_vm."""
+    if ref in (None, ""):
+        return None
+    ref = str(ref).strip()
+    if not _REF_VM.match(ref):
+        raise VenteInvalide("reference de VM illisible : cluster/vmid attendu")
+    return ref
+
+
 def verifier_vente(v):
-    """Normalise et controle une vente. Renvoie le dict propre a ecrire."""
+    """Normalise et controle une vente. Renvoie le dict propre a ecrire.
+
+    vm_ref (cluster/vmid) designe la VM ; vm_name en est le libelle, et le
+    repli d'une saisie faite sans reference (client d'API, ancienne page).
+    """
     nom = _texte(v.get("vm_name"), "le nom de la VM", 190, obligatoire=True)
     contrat = _texte(v.get("contrat"), "le numero de contrat", 100,
                      obligatoire=True)
@@ -608,6 +625,7 @@ def verifier_vente(v):
 
     return {
         "vm_name": nom,
+        "vm_ref": verifier_ref_vm(v.get("vm_ref")),
         "cluster_name": _texte(v.get("cluster_name"), "le cluster", 190),
         "contrat": contrat,
         "client": _texte(v.get("client"), "le client", 190),
@@ -634,12 +652,13 @@ def enregistrer_vente(conn, vente, par):
                         "FOR UPDATE", (v["contrat"],))
             avant = cur.fetchone()
             cur.execute(
-                "INSERT INTO commercial (vm_name, cluster_name, contrat, "
-                "client, prix_vente, devise, periode, debut, fin, actif, "
-                "cree_le, cree_par) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s) "
+                "INSERT INTO commercial (vm_name, vm_ref, cluster_name, "
+                "contrat, client, prix_vente, devise, periode, debut, fin, "
+                "actif, cree_le, cree_par) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s) "
                 "ON DUPLICATE KEY UPDATE "
                 "  vm_name = VALUES(vm_name), "
+                "  vm_ref = VALUES(vm_ref), "
                 "  cluster_name = VALUES(cluster_name), "
                 "  client = VALUES(client), "
                 "  prix_vente = VALUES(prix_vente), "
@@ -649,7 +668,8 @@ def enregistrer_vente(conn, vente, par):
                 "  fin = VALUES(fin), "
                 "  actif = 1, "
                 "  maj_le = %s, maj_par = %s",
-                (v["vm_name"], v["cluster_name"], v["contrat"], v["client"],
+                (v["vm_name"], v["vm_ref"], v["cluster_name"], v["contrat"],
+                 v["client"],
                  v["prix_vente"], v["devise"], v["periode"], v["debut"],
                  v["fin"], maintenant, par, maintenant, par))
             # rowcount : 1 = insertion, 2 = mise a jour (convention MySQL)
@@ -693,7 +713,8 @@ def lister_ventes(conn, vm=None, actives=True):
     sql = "SELECT * FROM commercial"
     where, args = [], []
     if vm:
-        where.append("vm_name = %s")
+        # une reference cluster/vmid, ou un nom
+        where.append("vm_ref = %s" if "/" in vm else "vm_name = %s")
         args.append(vm)
     if actives:
         where.append("actif = 1")

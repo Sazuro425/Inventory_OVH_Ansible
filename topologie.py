@@ -285,9 +285,9 @@ def construire(data, acces=None, conf=None):
                 noeuds.append({
                     "id": "vm:{}:{}".format(probe["host"], g.get("vmid")),
                     "parent": id_node, "kind": "vm",
-                    # clef de jointure avec la table commercial : c'est le nom
-                    # que le commercial connait, pas le vmid
-                    "vm": g.get("name") or "",
+                    # clef de jointure avec l'arbre de rentabilite : la
+                    # reference cluster/vmid, stable a un renommage
+                    "vm": orch.ref_vm(g),
                     "ovh": srv.get("ovh_name") or "",
                     "cluster": cluster,
                     "libelle": "Machine virtuelle" if type_g == "qemu"

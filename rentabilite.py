@@ -181,6 +181,8 @@ def calculer(data, ventes=(), elements=(), surcharges=(), roles=(),
             for s in surcharges if s.get("valeur") not in (None, "")}
     devises = set()
 
+    nb_corrections = len(corr)
+
     # -- serveurs, et le cluster de chacun ----------------------------------
     clusters = {}
     carte_srv = {}            # ovh_name -> carte
@@ -257,7 +259,8 @@ def calculer(data, ventes=(), elements=(), surcharges=(), roles=(),
 
     # -- VM, sous le noeud qui les fait tourner -------------------------------
     hote = orch.hote_des_invites(probes, invites)
-    vm_par_nom = {}           # nom -> [cartes], pour les ventes et elements
+    vm_par_ref = {}           # cluster/vmid -> carte : la designation stable
+    vm_par_nom = {}           # nom -> [cartes] : les saisies anterieures
     sans_serveur = 0
     for g in invites:
         parent = srv_par_reverse.get(hote[id(g)])
@@ -265,7 +268,7 @@ def calculer(data, ventes=(), elements=(), surcharges=(), roles=(),
             sans_serveur += 1
             continue
         nom = g.get("name") or "vm-{}".format(g.get("vmid"))
-        c = _carte("vm", nom, nom)
+        c = _carte("vm", orch.ref_vm(g), nom)
         c["infos"] = {
             "vmid": g.get("vmid"), "type": (g.get("type") or "").lower(),
             "statut": g.get("status") or None, "os": g.get("os") or None,
@@ -278,16 +281,22 @@ def calculer(data, ventes=(), elements=(), surcharges=(), roles=(),
         c["_pve_cluster"] = g.get("cluster")
         parent["enfants"].append(c)
         parent["_vms"].append(g)
+        vm_par_ref[c["cle"]] = c
         vm_par_nom.setdefault(nom, []).append(c)
     for lot in vm_par_nom.values():
         lot.sort(key=lambda c: (c["_cluster"], c["infos"]["vmid"] or 0))
 
-    def vm_pour(nom, cluster=None):
-        """La VM designee par son nom. Deux VM homonymes dans deux clusters :
-        le cluster indique tranche, sinon la premiere dans l'ordre des
-        clusters — toujours la meme, pour qu'un contrat ne compte qu'une fois.
+    def vm_pour(designation, cluster=None):
+        """La VM designee par sa reference cluster/vmid — ce qu'ecrit la
+        page — ou, pour une saisie anterieure a la migration 0002, par son
+        nom. Deux VM homonymes : le cluster indique tranche, sinon la premiere
+        dans l'ordre des clusters — toujours la meme, pour qu'un contrat ne
+        compte qu'une fois.
         """
-        lot = vm_par_nom.get(nom) or []
+        designation = designation or ""
+        if "/" in designation:
+            return vm_par_ref.get(designation)
+        lot = vm_par_nom.get(designation) or []
         if cluster:
             for c in lot:
                 if cluster in (c["_cluster"], c["_pve_cluster"]):
@@ -297,7 +306,7 @@ def calculer(data, ventes=(), elements=(), surcharges=(), roles=(),
     # -- ventes ---------------------------------------------------------------
     orphelins = []
     for v in ventes:
-        c = vm_pour(v.get("vm_name"), v.get("cluster_name"))
+        c = vm_pour(v.get("vm_ref") or v.get("vm_name"), v.get("cluster_name"))
         if v.get("devise"):
             devises.add(v["devise"])
         m = _num(v.get("vente_mois"))
@@ -315,17 +324,27 @@ def calculer(data, ventes=(), elements=(), surcharges=(), roles=(),
             "prix_vente": _num(v.get("prix_vente")), "periode": v.get("periode"),
             "vente_mois": m, "devise": v.get("devise")})
 
-    # une correction de VM vise la meme VM que les contrats : deux homonymes
-    # ne doivent pas recevoir tous deux le prix corrige
-    for nom, lot in vm_par_nom.items():
-        retenue = vm_pour(nom)
-        for c in lot:
-            if c is retenue:
-                c["pv_propre"] = _corriger(c, "prix_vente", c["pv_auto"],
-                                           corr) or 0.0
-                c["pa_propre"] = _corriger(c, "prix_achat", None, corr) or 0.0
-            else:
-                c["pv_propre"] = c["pv_auto"] or 0.0
+    # Une correction ou un role saisi par nom, avant la migration 0002, vise
+    # la meme VM que les contrats : un seul des homonymes. On le recopie sous
+    # sa reference ; une designation qui ne mene a aucune VM est signalee
+    # plutot que perdue en silence.
+    sans_cible = 0
+    for (t, ref, champ), s in list(corr.items()):
+        if t != "vm":
+            continue
+        c = vm_pour(ref)
+        if c is None:
+            sans_cible += 1
+        elif "/" not in ref:
+            corr.setdefault(("vm", c["cle"], champ), s)
+    for (t, ref), code in list(role_de.items()):
+        if t == "vm" and "/" not in ref:
+            c = vm_pour(ref)
+            if c is not None:
+                role_de.setdefault(("vm", c["cle"]), code)
+    for c in vm_par_ref.values():
+        c["pv_propre"] = _corriger(c, "prix_vente", c["pv_auto"], corr) or 0.0
+        c["pa_propre"] = _corriger(c, "prix_achat", None, corr) or 0.0
     for cl in clusters.values():
         cl["pa_propre"] = _corriger(cl, "prix_achat", None, corr) or 0.0
         cl["pv_propre"] = _corriger(cl, "prix_vente", None, corr) or 0.0
@@ -386,8 +405,6 @@ def calculer(data, ventes=(), elements=(), surcharges=(), roles=(),
     def attribuer(c):
         if c["type"] == "element":
             code = c["_e"].get("role")
-        elif c["type"] == "vm" and vm_pour(c["cle"]) is not c:
-            code = None
         else:
             code = role_de.get((c["type"], c["cle"]))
         c["infos"]["role"] = code or None
@@ -458,6 +475,10 @@ def calculer(data, ventes=(), elements=(), surcharges=(), roles=(),
     if sans_serveur:
         alertes.append("{} VM sur un hôte absent de la liste OVH, non comptées"
                        .format(sans_serveur))
+    if sans_cible:
+        alertes.append("{} correction(s) de VM ne visent plus aucune VM du "
+                       "parc : supprimée, ou recréée sous un autre vmid"
+                       .format(sans_cible))
     globale = {
         "pa": pa, "pv": pv, "roi": round(pv - pa, 2),
         "pv_hors_parc": hors_pv, "pa_hors_parc": hors_pa,
@@ -468,7 +489,7 @@ def calculer(data, ventes=(), elements=(), surcharges=(), roles=(),
         "nb_elements": len(cartes_el),
         "nb_contrats": len(ventes),
         "nb_orphelins": len(orphelins),
-        "nb_corrections": len(corr),
+        "nb_corrections": nb_corrections,
         "groupes_a_perte": sum(1 for c in arbre if c["roi"] < 0),
         "serveurs_a_perte": sum(1 for c in tous_srv if c["roi"] < 0),
         "serveurs_sans_tarif": sum(

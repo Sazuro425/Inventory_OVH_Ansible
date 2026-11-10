@@ -35,6 +35,7 @@ sys.path.insert(0, str(RACINE))
 import auth_locale as al  # noqa: E402
 import depot_scelle as ds  # noqa: E402
 import generer_demo  # noqa: E402
+import infra_inventory as orch  # noqa: E402
 import inventory_db as db  # noqa: E402
 import secret_store  # noqa: E402
 import serveur_web as web  # noqa: E402
@@ -135,6 +136,7 @@ DATA = generer_demo.generer(12, 2, 6, 7, 0.45, 0.05, 0.10, 0.06)
 DATA["costs"] = [{"ovh_name": s["ovh_name"], "price_month": 90.0,
                   "price_currency": "EUR"} for s in DATA["servers"]]
 UNE_VM = DATA["guests"][0]["name"]
+UNE_REF = orch.ref_vm(DATA["guests"][0])
 UN_SERVEUR = DATA["servers"][0]
 
 
@@ -180,12 +182,14 @@ def _():
 def _():
     c = service()
     try:
-        db.enregistrer_vente(c, {"vm_name": UNE_VM, "contrat": "C-001",
-                                 "prix_vente": "56", "periode": "mois"}, "evan")
-        db.poser_role(c, {"cible_type": "vm", "cible_ref": UNE_VM,
+        # comme la page : la VM par sa reference cluster/vmid
+        db.enregistrer_vente(c, {"vm_name": UNE_VM, "vm_ref": UNE_REF,
+                                 "contrat": "C-001", "prix_vente": "56",
+                                 "periode": "mois"}, "evan")
+        db.poser_role(c, {"cible_type": "vm", "cible_ref": UNE_REF,
                           "role": "lamp"}, "evan")
         lot = db.enregistrer_elements(c, {
-            "parent_type": "vm", "parent_ref": UNE_VM, "role": "site",
+            "parent_type": "vm", "parent_ref": UNE_REF, "role": "site",
             "noms": ["a.fr", "b.fr", "c.fr", "d.fr"], "prix_vente": "40",
             "periode": "mois"}, "evan")
         e = db.enregistrer_element(c, {"parent_type": "element",
@@ -211,7 +215,7 @@ def _():
 
     def trouve(cartes):
         for x in cartes:
-            if x["type"] == "vm" and x["cle"] == UNE_VM:
+            if x["type"] == "vm" and x["cle"] == UNE_REF:
                 return x
             t = trouve(x["enfants"])
             if t:
@@ -353,6 +357,44 @@ def _():
         egal(db.version_schema(w) >= 1, True, "le service lit la version")
     finally:
         w.close()
+
+
+@test("migration 0002 : les saisies par nom passent a cluster/vmid")
+def _():
+    deuxieme = DATA["guests"][1]
+    c = collecte()
+    try:
+        with c.cursor() as cur:
+            # des saisies d'avant la migration : la VM par son nom
+            cur.execute("INSERT INTO commercial (vm_name, contrat, prix_vente, "
+                        "cree_le, cree_par) VALUES (%s, 'L-1', 10, NOW(), 't'),"
+                        " ('vm-disparue', 'L-2', 10, NOW(), 't')",
+                        (deuxieme["name"],))
+            cur.execute("INSERT INTO element (parent_type, parent_ref, nom, "
+                        "cree_le, cree_par) VALUES ('vm', %s, 'ancien.fr', NOW(),"
+                        " 't')", (deuxieme["name"],))
+            cur.execute("INSERT INTO role_carte (cible_type, cible_ref, role, "
+                        "maj_le, maj_par) VALUES ('vm', %s, 'web', NOW(), 't')",
+                        (deuxieme["name"],))
+        c.commit()
+        # la migration est rejouable : on la repasse sur ces lignes
+        chemin = [m for m in db.migrations_disponibles() if m[0] == 2][0][2]
+        with c.cursor() as cur:
+            for sql in db.instructions_sql(chemin.read_text(encoding="utf-8")):
+                cur.execute(sql)
+            c.commit()
+            cur.execute("SELECT contrat, vm_ref FROM commercial "
+                        "WHERE contrat IN ('L-1', 'L-2') ORDER BY contrat")
+            ventes = [(r["contrat"], r["vm_ref"]) for r in cur.fetchall()]
+            cur.execute("SELECT parent_ref FROM element WHERE nom = 'ancien.fr'")
+            parent = cur.fetchone()["parent_ref"]
+            cur.execute("SELECT cible_ref FROM role_carte WHERE role = 'web'")
+            cible = cur.fetchone()["cible_ref"]
+    finally:
+        c.close()
+    ref = orch.ref_vm(deuxieme)
+    egal(ventes, [("L-1", ref), ("L-2", None)], "introuvable : laisse par nom")
+    egal((parent, cible), (ref, ref))
 
 
 # --------------------------------------------------------------------------

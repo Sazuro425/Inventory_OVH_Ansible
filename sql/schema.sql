@@ -191,6 +191,9 @@ CREATE TABLE IF NOT EXISTS server_cost (
 CREATE TABLE IF NOT EXISTS commercial (
   id           INT AUTO_INCREMENT PRIMARY KEY,
   vm_name      VARCHAR(190)  NOT NULL,
+  -- la VM vendue : cluster/vmid (migration 0002) ; vm_name en reste le
+  -- libelle, et sert encore de repli pour une saisie sans reference
+  vm_ref       VARCHAR(190)  NULL,
   cluster_name VARCHAR(190)  NULL,
   contrat      VARCHAR(100)  NOT NULL,
   client       VARCHAR(190)  NULL,
@@ -208,8 +211,13 @@ CREATE TABLE IF NOT EXISTS commercial (
   -- double saisie, l'erreur la plus courante quand deux commerciaux
   -- travaillent sur le meme parc
   UNIQUE KEY uq_contrat (contrat),
-  INDEX idx_vente_vm (vm_name, actif)
+  INDEX idx_vente_vm (vm_name, actif),
+  INDEX idx_vente_ref (vm_ref, actif)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Une base anterieure a vm_ref : la colonne doit exister avant que la vue
+-- v_vente_active ci-dessous la cite, sinon rejouer ce fichier echoue.
+ALTER TABLE commercial ADD COLUMN IF NOT EXISTS vm_ref VARCHAR(190) NULL AFTER vm_name;
 
 -- ---------------------------------------------------------------------------
 -- Elements declares a la main : ce que la collecte ne voit pas.
@@ -540,7 +548,7 @@ CREATE OR REPLACE VIEW v_current_costs AS
 -- qui est mensuel lui aussi.
 CREATE OR REPLACE VIEW v_vente_active AS
   SELECT
-    id, vm_name, cluster_name, contrat, client, devise,
+    id, vm_name, vm_ref, cluster_name, contrat, client, devise,
     prix_vente, periode,
     CASE WHEN periode = 'an' THEN prix_vente / 12 ELSE prix_vente END
       AS vente_mois

@@ -1261,14 +1261,14 @@ function listeContrats(d, c) {
                    textContent: euro(v.prix_vente, v.devise) + ' / ' + v.periode }));
     if (commerce.peutEcrire) {
       li.appendChild(el('button', { textContent: 'Éditer',
-        onclick: () => formVente(c.cle, v) }));
+        onclick: () => formVente(c, v) }));
     }
     ul.appendChild(li);
   }
   if (contrats.length) d.appendChild(ul);
   if (commerce.peutEcrire) {
     d.appendChild(el('button', { textContent: 'Ajouter un contrat',
-                                 onclick: () => formVente(c.cle, null) }));
+                                 onclick: () => formVente(c, null) }));
   }
 }
 
@@ -1497,7 +1497,7 @@ function actionsCarte(c) {
     }
     if (c.type === 'vm') {
       act.appendChild(el('button', { textContent: 'Contrat',
-                                     onclick: () => formVente(c.cle, null) }));
+                                     onclick: () => formVente(c, null) }));
     }
   }
   return act;
@@ -2832,9 +2832,11 @@ function formCorrection(c) {
   corps.appendChild(f);
 }
 
+// vm : la carte de la VM ; la vente porte sa reference cluster/vmid, et son
+// nom comme libelle
 function formVente(vm, existant) {
   const corps = ouvrirTiroir(existant ? 'Contrat ' + existant.contrat : 'Nouveau contrat',
-                             'VM ' + vm);
+                             'VM ' + vm.nom);
   const f = el('form', { autocomplete: 'off', className: 'saisie' });
   const contrat = champ(f, 'Numéro de contrat (Dolibarr)', { type: 'text',
     required: true, maxLength: 100, value: existant ? existant.contrat : '',
@@ -2861,7 +2863,7 @@ function formVente(vm, existant) {
   f.onsubmit = ev => {
     ev.preventDefault();
     soumettre(f, () => poster('/api/commercial', {
-      vm_name: vm, contrat: contrat.value, prix_vente: prix.value,
+      vm_ref: vm.cle, vm_name: vm.nom, contrat: contrat.value, prix_vente: prix.value,
       periode: per.value, client: client.value,
     }), existant ? 'Contrat corrigé.' : 'Vente enregistrée.');
   };
