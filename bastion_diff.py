@@ -90,7 +90,7 @@ def acces_depuis_charge(charge):
                     "port": str(noeud.get("port") or "*"),
                     "origine": noeud.get("group") or contexte or "personnel",
                 })
-            for cle, val in noeud.items():
+            for val in noeud.values():
                 visiter(val, noeud.get("group") or contexte)
         elif isinstance(noeud, list):
             for item in noeud:

@@ -40,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import yaml  # noqa: E402
 
-from ovh_inventory import OvhClient, OvhError, ENDPOINTS  # noqa: E402
+from ovh_inventory import OvhClient, OvhError  # noqa: E402
 from ovh_inventory import load_credentials as load_ovh_credentials  # noqa: E402
 from ovh_inventory import fetch_costs as fetch_ovh_costs_api  # noqa: E402
 import inventory_db  # noqa: E402
@@ -206,7 +206,7 @@ def token_for(conf, host):
         # qui ne traite que OvhError et PveError.
         raise PveError(
             "token illisible pour {} ({}) : {}".format(host, reference, exc),
-            fatal=True)
+            fatal=True) from exc
 
 
 # --------------------------------------------------------------------------
@@ -883,6 +883,10 @@ def main():
             if args.store_db:
                 try:
                     conn = inventory_db.connect(conf)
+                    if conf.get("db", {}).get("auto_schema", True):
+                        for v in inventory_db.appliquer_migrations(
+                                conn, dire=lambda *a: None):
+                            log("schema migre en v{}".format(v))
                     run_id = inventory_db.store_run(conn, data)
                     log("snapshot #{} enregistre en base".format(run_id))
                     garde = conf.get("db", {}).get("keep_runs")
@@ -890,6 +894,9 @@ def main():
                         n = inventory_db.purge(conn, int(garde))
                         if n:
                             log("{} ancien(s) run(s) purge(s)".format(n))
+                    n = inventory_db.purger_jetons_clients(conn)
+                    if n:
+                        log("{} jeton(s) client perime(s) purge(s)".format(n))
                     conn.close()
                 except inventory_db.DbError as exc:
                     log("base non alimentee : " + str(exc))

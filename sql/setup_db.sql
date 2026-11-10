@@ -60,39 +60,16 @@ GRANT CREATE, CREATE VIEW, DROP, INDEX, REFERENCES, ALTER
 
 
 -- ---------------------------------------------------------------------------
--- Compte du service web
+-- Compte du service web : PAS ICI
 -- ---------------------------------------------------------------------------
--- Mot de passe distinct de celui de la collecte : deux comptes partageant le
--- meme mot de passe ne sont qu'un seul compte avec deux noms.
-
-CREATE USER IF NOT EXISTS 'inventory_web'@'localhost'
-  IDENTIFIED VIA mysql_native_password USING PASSWORD('MOT_DE_PASSE_WEB_A_DEFINIR');
-ALTER USER 'inventory_web'@'localhost'
-  IDENTIFIED VIA mysql_native_password USING PASSWORD('MOT_DE_PASSE_WEB_A_DEFINIR');
-
--- Lecture de l'inventaire. Table par table, jamais inventory.* : un GRANT sur
--- la base entiere couvrirait secret_store, et couvrirait d'office toute table
--- ajoutee plus tard — y compris celle a laquelle personne n'aura pense.
-GRANT SELECT ON inventory.v_last_run        TO 'inventory_web'@'localhost';
-GRANT SELECT ON inventory.server_snapshot   TO 'inventory_web'@'localhost';
-GRANT SELECT ON inventory.node_snapshot     TO 'inventory_web'@'localhost';
-GRANT SELECT ON inventory.guest_snapshot    TO 'inventory_web'@'localhost';
-
--- Les vues v_current_* ne sont pas lues par le service aujourd'hui, mais
--- servent aux requetes d'exploitation a la main sous ce compte.
-GRANT SELECT ON inventory.v_current_servers   TO 'inventory_web'@'localhost';
-GRANT SELECT ON inventory.v_current_nodes     TO 'inventory_web'@'localhost';
-GRANT SELECT ON inventory.v_current_guests    TO 'inventory_web'@'localhost';
-GRANT SELECT ON inventory.v_current_inventory TO 'inventory_web'@'localhost';
-
--- Jetons a usage unique : emission et consommation. Pas de DELETE — la purge
--- des jetons perimes releve de l'administration, pas du service expose.
-GRANT SELECT, INSERT, UPDATE ON inventory.client_token
-  TO 'inventory_web'@'localhost';
-
--- Aucun GRANT sur inventory.secret_store. C'est le but de ce compte.
--- A verifier apres toute evolution du schema (voir la requete en fin de
--- fichier) : un GRANT trop large se remarque mal a la relecture.
+-- Il est cree par setup_db_web.sql, a lancer APRES schema.sql. Ses droits
+-- sont accordes table par table, et MariaDB refuse un GRANT sur une table
+-- ou une vue qui n'existe pas encore (erreur 1146) : les poser ici, avant
+-- le schema, faisait echouer ce fichier.
+--
+--   mariadb < sql/setup_db.sql
+--   mariadb inventory < sql/schema.sql
+--   mariadb < sql/setup_db_web.sql
 
 FLUSH PRIVILEGES;
 
@@ -102,17 +79,6 @@ FLUSH PRIVILEGES;
 -- ---------------------------------------------------------------------------
 
 SELECT user, host, plugin FROM mysql.user
- WHERE user IN ('inventory', 'inventory_web');
+ WHERE user = 'inventory';
 
--- Doit ne rien renvoyer : le compte web n'a aucun droit sur les secrets.
--- Une ligne ici signifie que la separation ne tient pas.
-SELECT grantee, table_name, privilege_type
-  FROM information_schema.table_privileges
- WHERE grantee LIKE "'inventory_web'%"
-   AND table_name = 'secret_store';
-
--- Doit ne rien renvoyer non plus : un droit au niveau de la base couvrirait
--- secret_store sans apparaitre dans la requete precedente.
-SELECT grantee, privilege_type
-  FROM information_schema.schema_privileges
- WHERE grantee LIKE "'inventory_web'%";
+-- La separation des comptes se verifie en fin de setup_db_web.sql.

@@ -142,10 +142,8 @@ def emettre_jeton(conn, utilisateur, duree_min=DUREE_JETON_MIN):
             "VALUES (%s, %s, %s, %s)",
             (empreinte(jeton), utilisateur, maintenant,
              maintenant + dt.timedelta(minutes=duree_min)))
-        # menage au passage : les jetons perimes depuis un jour n'ont plus
-        # d'interet, meme pour la tracabilite
-        cur.execute("DELETE FROM client_token WHERE expire_le < %s",
-                    (maintenant - dt.timedelta(days=1),))
+    # Pas de menage ici : le compte web n'a pas DELETE, et c'est voulu. Les
+    # jetons perimes sont purges par la collecte (purger_jetons_clients).
     conn.commit()
     return jeton, duree_min
 
@@ -424,6 +422,16 @@ class Handler(BaseHTTPRequestHandler):
             self.repondre(422, {"erreur": str(exc)})
         except inventory_db.DbError as exc:
             self.repondre(503, {"erreur": str(exc)})
+        except Exception as exc:
+            # Une erreur SQL brute (droit manquant, colonne absente) remontait
+            # jusqu'a http.server, qui coupait la connexion : le navigateur
+            # lisait une erreur reseau. Le detail va au journal du service.
+            if inventory_db.pymysql and isinstance(exc, inventory_db.pymysql.Error):
+                self.log_message("erreur SQL : %s", pour_journal(exc))
+                self.repondre(503, {"erreur": "erreur de base, voir le journal "
+                                              "du service"})
+            else:
+                raise
         finally:
             conn.close()
         return None, True
@@ -1000,12 +1008,20 @@ class Handler(BaseHTTPRequestHandler):
             conn = self.base()
             try:
                 data = inventory_db.load_latest(conn)
+                version = inventory_db.version_schema(conn)
             finally:
                 conn.close()
         except inventory_db.DbError as exc:
             self.log_message("sante degradee : %s", pour_journal(exc))
             return self.repondre(503, {"etat": "degrade",
                                        "erreur": "base indisponible"})
+        attendue = inventory_db.version_attendue()
+        if version < attendue:
+            # le code attend des tables que la base n'a pas encore
+            self.log_message("schema v%s, le code attend v%s : inventory_cli.py "
+                             "--migrer", version, attendue)
+            return self.repondre(503, {"etat": "degrade",
+                                       "erreur": "schema en retard sur le code"})
         if data is None:
             return self.repondre(503, {"etat": "degrade",
                                        "erreur": "aucun snapshot en base"})

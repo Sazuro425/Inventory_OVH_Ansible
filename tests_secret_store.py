@@ -50,7 +50,7 @@ def doit_lever(exception, fn, *a, **kw):
     except NotImplementedError:
         raise
     except Exception as exc:
-        raise AssertionError(
+        raise AssertionError(  # noqa: B904 — l'exception d'origine est dans le message
             "attendu {}, obtenu {} : {}".format(
                 exception.__name__, type(exc).__name__, exc))
     raise AssertionError(

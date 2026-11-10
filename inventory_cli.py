@@ -8,6 +8,7 @@ inventory - administration des secrets de l'inventaire.
     inventory --pve HOTE             renouvelle le jeton d'un hyperviseur
     inventory --db                   change le mot de passe de la base
     inventory --rotate-key           rechiffre tout sous une nouvelle clef
+    inventory --migrer               applique les migrations du schema
     inventory --init-depot           tire la clef de la boite de depot PVE
     inventory --traiter-depots       teste et range les jetons deposes depuis
                                      la page (collecte.sh le lance)
@@ -367,6 +368,18 @@ def commande_ovh(args, conf, conn, cle):
 nom_secret_pve = secret_store.nom_secret_pve
 
 
+def commande_migrer(args, conf, conn):
+    """Met la base a la version du code. Ni clef maitresse ni secret."""
+    avant = inventory_db.version_schema(conn)
+    faites = inventory_db.appliquer_migrations(conn)
+    apres = inventory_db.version_schema(conn)
+    print("  schema : v{} -> v{}{}".format(
+        avant, apres, "" if faites else " (rien a faire)"))
+    if faites:
+        print("  puis, en root : mariadb < sql/droits_web.sql")
+    return 0
+
+
 def commande_init_depot(args, conf, conn, cle):
     """Tire la paire de la boite de depot scellee."""
     import depot_scelle
@@ -651,6 +664,8 @@ def main():
                    help="change le mot de passe de la base")
     g.add_argument("--rotate-key", action="store_true",
                    help="rechiffre tout sous une nouvelle clef")
+    g.add_argument("--migrer", action="store_true",
+                   help="applique les migrations du schema (sql/migrations)")
     g.add_argument("--init-depot", action="store_true",
                    help="tire la clef de la boite de depot des jetons PVE")
     g.add_argument("--traiter-depots", action="store_true",
@@ -713,6 +728,8 @@ def main():
             return commande_compte_local(args, conf, conn)
         if args.traiter_depots:
             return commande_traiter_depots(args, conf, conn)
+        if args.migrer:
+            return commande_migrer(args, conf, conn)
 
         cle = secret_store.charger_cle_maitresse()
         if args.init_depot:

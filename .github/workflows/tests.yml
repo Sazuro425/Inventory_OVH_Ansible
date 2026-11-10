@@ -1,0 +1,54 @@
+# Tests a chaque push et pull request.
+#
+# Les tests tournent dans debian:12 avec les paquets Debian, donc avec les
+# memes versions que la VM de production (Python 3.11, MariaDB 10.11,
+# python3-cryptography) : une fonction absente de la version Debian casse
+# ici, pas en prod.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    container: debian:12
+    steps:
+      - name: Paquets Debian, ceux de la VM
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            mariadb-server python3-pymysql python3-yaml \
+            python3-cryptography python3-requests > /dev/null
+
+      - uses: actions/checkout@v4
+
+      - name: Tests unitaires
+        run: |
+          python3 tests_rentabilite.py
+          python3 tests_web.py
+          python3 tests_secret_store.py
+
+      - name: Tests sur MariaDB (setup_db, schema, migrations, droits)
+        run: |
+          service mariadb start
+          INVENTAIRE_TEST_MARIADB=detruire python3 tests_mariadb.py
+
+      - name: Syntaxe des scripts shell
+        run: for f in deploy/*.sh; do bash -n "$f"; done
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: ruff
+        run: |
+          pip install --quiet ruff==0.17.4
+          ruff check .

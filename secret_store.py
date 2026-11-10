@@ -70,7 +70,7 @@ def chiffrer(cle, nom, valeur):
     nonce = os.urandom(TAILLE_NONCE)
     chiffre = AESGCM(cle).encrypt(nonce, valeur.encode(), nom.encode())
     return nonce, chiffre
-    
+
 
 
 def dechiffrer(cle, nom, nonce, chiffre):
@@ -85,7 +85,7 @@ def dechiffrer(cle, nom, nonce, chiffre):
 
 
 def generer_cle():
-    key = secrets.token_bytes(32) 
+    key = secrets.token_bytes(32)
     return base64.b64encode(key).decode()
 
 

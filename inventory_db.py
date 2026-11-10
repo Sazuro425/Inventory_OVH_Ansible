@@ -133,12 +133,7 @@ def ensure_schema(conn, force=False):
     if chemin is None:
         raise DbError("tables absentes et sql/schema.sql introuvable")
 
-    brut = chemin.read_text(encoding="utf-8")
-    sans_commentaires = "\n".join(
-        l for l in brut.splitlines() if not l.strip().startswith("--"))
-    instructions = [b.strip() for b in sans_commentaires.split(";") if b.strip()]
-    # le USE du fichier vise 'inventory' : la connexion est deja sur la bonne base
-    instructions = [i for i in instructions if not i.upper().startswith("USE ")]
+    instructions = instructions_sql(chemin.read_text(encoding="utf-8"))
 
     try:
         with conn.cursor() as cur:
@@ -158,7 +153,105 @@ def ensure_schema(conn, force=False):
                 "    python setup_inventory_db.py --db-password '<mdp>'".format(exc)
             ) from exc
         raise DbError("creation du schema impossible : {}".format(exc)) from exc
+    appliquer_migrations(conn, dire=lambda *a: None)
     return True
+
+
+def instructions_sql(texte):
+    """Un fichier SQL en ordres a executer un par un.
+
+    Decoupage au point-virgule, lignes de commentaire retirees : suffisant
+    pour nos fichiers, qui n'ont ni procedure stockee ni point-virgule dans
+    une chaine. Le USE est ignore, la connexion est deja sur la bonne base.
+    """
+    sans_commentaires = "\n".join(
+        l for l in texte.splitlines() if not l.strip().startswith("--"))
+    instructions = [b.strip() for b in sans_commentaires.split(";") if b.strip()]
+    return [i for i in instructions if not i.upper().startswith("USE ")]
+
+
+# ---------------------------------------------------------------------------
+# Migrations : sql/migrations/NNNN_nom.sql, appliquees une fois, dans l'ordre
+# ---------------------------------------------------------------------------
+
+DOSSIER_MIGRATIONS = Path(__file__).resolve().parent / "sql" / "migrations"
+_NOM_MIGRATION = re.compile(r"^(\d{4})_([a-z0-9_]+)\.sql$")
+
+
+def migrations_disponibles(dossier=None):
+    """[(version, nom, chemin)], triees. La version 1 est schema.sql."""
+    dossier = Path(dossier or DOSSIER_MIGRATIONS)
+    out, vues = [], {}
+    if not dossier.is_dir():
+        return out
+    for f in sorted(dossier.iterdir()):
+        if f.suffix != ".sql":
+            continue
+        m = _NOM_MIGRATION.match(f.name)
+        if not m:
+            raise DbError("migration mal nommee : {} (attendu NNNN_nom.sql)"
+                          .format(f.name))
+        v = int(m.group(1))
+        if v < 2:
+            raise DbError("{} : la version 1 est schema.sql, les migrations "
+                          "commencent a 0002".format(f.name))
+        if v in vues:
+            raise DbError("deux migrations en version {} : {} et {}".format(
+                v, vues[v], f.name))
+        vues[v] = f.name
+        out.append((v, m.group(2), f))
+    return out
+
+
+def version_attendue(dossier=None):
+    lst = migrations_disponibles(dossier)
+    return lst[-1][0] if lst else 1
+
+
+def version_schema(conn):
+    """La version de la base, 0 si la table des versions n'existe pas."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COALESCE(MAX(version), 0) AS v FROM schema_version")
+            return int(cur.fetchone()["v"])
+    except pymysql.Error as exc:
+        if (exc.args[0] if exc.args else 0) == 1146:
+            return 0
+        raise _traduit(exc, "la lecture de la version du schema") from exc
+
+
+def appliquer_migrations(conn, dossier=None, dire=print):
+    """Applique les migrations au-dela de la version de la base. Rend la
+    liste des versions appliquees.
+
+    Le DDL de MariaDB n'est pas transactionnel : une migration interrompue a
+    mi-chemin laisse ses premiers ordres en place. D'ou la regle : une
+    migration s'ecrit rejouable (IF NOT EXISTS, IF EXISTS), et elle n'est
+    inscrite qu'une fois tous ses ordres passes.
+    """
+    actuelle = version_schema(conn)
+    if actuelle == 0:
+        raise DbError("table schema_version absente : rejoue sql/schema.sql "
+                      "d'abord")
+    faites = []
+    for v, nom, chemin in migrations_disponibles(dossier):
+        if v <= actuelle:
+            continue
+        dire("migration {:04d} {}".format(v, nom))
+        ordres = instructions_sql(chemin.read_text(encoding="utf-8"))
+        try:
+            with conn.cursor() as cur:
+                for sql in ordres:
+                    cur.execute(sql)
+                cur.execute("INSERT INTO schema_version (version, nom, "
+                            "applique_le, applique_par) VALUES (%s, %s, %s, "
+                            "CURRENT_USER())", (v, nom, dt.datetime.now()))
+            conn.commit()
+        except pymysql.Error as exc:
+            conn.rollback()
+            raise _traduit(exc, "la migration {}".format(chemin.name)) from exc
+        faites.append(v)
+    return faites
 
 
 def _json_ok(value):
@@ -200,7 +293,7 @@ def _traduit(exc, quoi):
         return DbError(
             "droits insuffisants pour {} : le compte de collecte a besoin de "
             "SELECT, INSERT, UPDATE, DELETE sur la base ; le compte web, des "
-            "seuls droits poses par sql/setup_db_web.sql — a rejouer apres "
+            "seuls droits poses par sql/droits_web.sql — a rejouer apres "
             "chaque mise a jour du schema.".format(quoi))
     return DbError("{} impossible : {}".format(quoi, exc))
 
@@ -373,6 +466,19 @@ def load_latest(conn):
         "generated_at": int(run["started_at"].timestamp()),
         "run_id": run["id"], "run_status": run["status"],
     }
+
+
+def purger_jetons_clients(conn, delai=dt.timedelta(days=1)):
+    """Efface les jetons Ansible perimes depuis plus d'un jour.
+
+    Fait par la collecte : le service web, qui les emet, n'a pas DELETE.
+    """
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM client_token WHERE expire_le < %s",
+                    (dt.datetime.now() - delai,))
+        n = cur.rowcount
+    conn.commit()
+    return n
 
 
 def purge(conn, keep):

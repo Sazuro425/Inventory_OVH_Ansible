@@ -429,6 +429,24 @@ CREATE TABLE IF NOT EXISTS journal_saisie (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ---------------------------------------------------------------------------
+-- Version du schema.
+--
+-- Ce fichier est la version 1 : il cree tout, et se rejoue sans dommage.
+-- Chaque evolution suivante est une migration numerotee de sql/migrations
+-- (0002_xxx.sql...), appliquee une fois par `inventory_cli.py --migrer`, qui
+-- l'inscrit ici. Une migration ne se modifie jamais apres coup : on en
+-- ecrit une nouvelle.
+CREATE TABLE IF NOT EXISTS schema_version (
+  version      INT           NOT NULL PRIMARY KEY,
+  nom          VARCHAR(120)  NOT NULL,
+  applique_le  DATETIME      NOT NULL,
+  applique_par VARCHAR(190)  NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO schema_version (version, nom, applique_le, applique_par)
+  VALUES (1, 'base (schema.sql)', NOW(), 'schema.sql');
+
+-- ---------------------------------------------------------------------------
 -- Migration : ajoute les colonnes manquantes sur une base deja en place.
 -- ADD COLUMN IF NOT EXISTS est idempotent, ce bloc peut etre rejoue.
 -- ---------------------------------------------------------------------------

@@ -1,0 +1,10 @@
+# Lint du projet : `ruff check .` (et en CI, .github/workflows/tests.yml).
+#
+# Des regles qui trouvent des bugs plutot que du style : erreurs de syntaxe
+# (E9), pyflakes (F : import ou variable inutile, nom indefini), bugbear (B :
+# piege courant), espaces parasites (W). La mise en page reste libre.
+target-version = "py311"
+line-length = 100
+
+[lint]
+select = ["E9", "F", "B", "W"]

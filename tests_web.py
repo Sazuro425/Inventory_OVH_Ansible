@@ -454,6 +454,31 @@ def _():
          "le depot illisible n'est meme pas teste")
 
 
+@test("migrations : nommees NNNN_nom.sql, a partir de 0002, sans doublon")
+def _():
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as d:
+        egal(db.migrations_disponibles(d), [])
+        egal(db.version_attendue(d), 1, "sans migration, la base (schema.sql)")
+        (Path(d) / "0003_b.sql").write_text("")
+        (Path(d) / "0002_a.sql").write_text("")
+        (Path(d) / "LISEZMOI.md").write_text("")
+        egal([(v, n) for v, n, _ in db.migrations_disponibles(d)],
+             [(2, "a"), (3, "b")])
+        for mauvais in ("0002_double.sql", "0001_base.sql", "2_court.sql"):
+            (Path(d) / mauvais).write_text("")
+            try:
+                db.migrations_disponibles(d)
+            except db.DbError:
+                pass
+            else:
+                raise AssertionError("aurait du refuser " + mauvais)
+            (Path(d) / mauvais).unlink()
+    egal(db.instructions_sql("-- note\nUSE inventory;\nSELECT 1;\n\nSELECT 2;"),
+         ["SELECT 1", "SELECT 2"])
+
+
 @test("collecte : infra.yml d'abord, puis le jeton depose, puis default_token")
 def _():
     import infra_inventory as orch

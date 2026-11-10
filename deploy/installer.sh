@@ -240,7 +240,8 @@ RESTE+=("creer la base et le compte : cd $PREFIXE && python3 setup_inventory_db.
 # le mot de passe du compte de collecte au marqueur du fichier, et la collecte
 # ne pourrait plus ouvrir la base.
 RESTE+=("creer le compte du service web : mariadb -u root -p < $PREFIXE/sql/setup_db_web.sql (apres y avoir mis un mot de passe)")
-RESTE+=("verifier la separation : les deux requetes en fin de setup_db_web.sql doivent ne rien renvoyer")
+RESTE+=("puis ses droits, et apres chaque mise a jour : mariadb -u root -p < $PREFIXE/sql/droits_web.sql")
+RESTE+=("verifier la separation : les requetes en fin de droits_web.sql doivent ne rien renvoyer")
 RESTE+=("eprouver la collecte : python3 infra_inventory.py --refresh --seulement 'ns1234*' --table")
 RESTE+=("chiffrer les secrets : ./deploy/chiffrer-secrets.sh, puis basculer les unites en LoadCredentialEncrypted")
 RESTE+=("si secrets en base : python3 inventory_cli.py --init-key | systemd-creds encrypt --name=master_key - /etc/inventaire-infra/creds/master_key.cred")

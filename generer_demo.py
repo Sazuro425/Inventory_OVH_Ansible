@@ -129,7 +129,7 @@ def generer(nb_dedies, vm_min, vm_max, seed, taux_cluster, taux_panne,
         if not noeuds_du_cluster:
             continue
         representant = noeuds_du_cluster[0][0]
-        for reverse, noeud, rang in noeuds_du_cluster:
+        for _reverse, noeud, rang in noeuds_du_cluster:
             for _ in range(alea.randint(vm_min, vm_max)):
                 vmid += 1
                 windows = alea.random() < taux_windows

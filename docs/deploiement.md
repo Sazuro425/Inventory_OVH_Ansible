@@ -68,17 +68,20 @@ python3 setup_inventory_db.py --db-password '<mdp collecte>'
 python3 setup_inventory_db.py --check        # relit et confirme
 ```
 
-Puis le compte web, avec le fichier qui ne contient que lui :
+Puis les migrations, le compte web, et ses droits :
 
 ```bash
+python3 inventory_cli.py --migrer             # sous le compte de collecte
 # remplacer MOT_DE_PASSE_WEB_A_DEFINIR d'abord
 mariadb -u root -p < sql/setup_db_web.sql
+mariadb -u root -p < sql/droits_web.sql
 ```
 
-`setup_db_web.sql` ne touche que `inventory_web`, et porte les deux requetes
-de verification. C'est pour cela qu'il existe : rejouer tout `setup_db.sql`
-reposerait le mot de passe du compte de collecte au marqueur du fichier, et
-la collecte ne pourrait plus ouvrir la base.
+`setup_db_web.sql` ne fait que creer `inventory_web` (ou changer son mot de
+passe) : rejouer tout `setup_db.sql` reposerait le mot de passe du compte de
+collecte au marqueur du fichier. `droits_web.sql` ne contient que les droits,
+sans mot de passe, et porte les requetes de verification : c'est lui qu'on
+rejoue apres chaque mise a jour.
 
 ### Voie B — tout en SQL
 
@@ -86,11 +89,18 @@ la collecte ne pourrait plus ouvrir la base.
 # remplacer MOT_DE_PASSE_A_DEFINIR et MOT_DE_PASSE_WEB_A_DEFINIR d'abord
 mariadb -u root -p < sql/setup_db.sql
 mariadb -u root -p inventory < sql/schema.sql
+python3 inventory_cli.py --migrer             # sous le compte de collecte
+mariadb -u root -p < sql/setup_db_web.sql
+mariadb -u root -p < sql/droits_web.sql
 ```
 
-Dans cet ordre : `setup_db.sql` cree la base, `schema.sql` la remplit. Les
-`GRANT` sur les vues portent sur des objets qui n'existent pas encore, ce que
-MariaDB accepte — un `GRANT` ne verifie pas la cible.
+Dans cet ordre, et pas autrement : `setup_db.sql` cree la base et le compte
+de collecte, `schema.sql` cree les tables (version 1), `--migrer` applique
+les versions suivantes, `setup_db_web.sql` cree le compte web,
+`droits_web.sql` lui donne ses droits. MariaDB refuse un `GRANT` sur une
+table qui n'existe pas encore (erreur 1146) : les droits viennent en dernier.
+
+`tests_mariadb.py` rejoue exactement cette sequence sur un MariaDB jetable.
 
 > **Attention :** `--db-password` place le mot de passe sur la ligne de
 > commande, donc visible dans un `ps` le temps de l'execution, et conserve
@@ -469,18 +479,13 @@ capacite allouee contre la capacite physique. Le calcul est dans
    cout peut aussi etre saisi a la main (bouton *Modifier*, ou *Prix et
    role* sur la fiche de l'hyperviseur), avec un motif.
 2. Le schema a jour, puis les droits du compte web, **dans cet ordre** :
-   un `GRANT` sur une table qui n'existe pas encore echoue.
+   un `GRANT` sur une table qui n'existe pas encore echoue (voir 12).
 
-   ```bash
-   mariadb -u root -p inventory < sql/schema.sql
-   mariadb -u root -p < sql/setup_db_web.sql
-   ```
-
-   La derniere requete de `setup_db_web.sql` doit lister exactement :
+   La derniere requete de `droits_web.sql` doit lister exactement :
    `client_token`, `commercial`, `element`, `role`, `role_carte`,
    `session_locale`, `surcharge`, `vue_rentabilite` en INSERT,UPDATE,
-   `compte_local` en UPDATE seul, et `journal_saisie` en INSERT seul. Le compte web ne peut ni corriger ni
-   effacer le journal.
+   `compte_local` en UPDATE seul, `depot_jeton` et `journal_saisie` en
+   INSERT seul. Le compte web ne peut ni corriger ni effacer le journal.
 3. Le role commercial. En comptes locaux, il est porte par le compte
    (`--roles commercial`, l'admin genere l'a). En OIDC, dans `infra.yml` :
    `web.groupe_commercial` (le groupe Authentik) ou `web.commerciaux` (une
@@ -574,3 +579,31 @@ fichier `.avant-chiffrement` — tant qu'il n'a pas ete `shred`.
 illisibles. Repasser `infra.yml` sur des references `env:`, remplir le
 fichier d'environnement, repartir a l'etape 5. Les snapshots d'inventaire,
 eux, ne sont pas chiffres et restent intacts.
+
+---
+
+## 12. Mettre a jour
+
+Le schema est versionne : `schema.sql` est la version 1, chaque evolution
+une migration numerotee de `sql/migrations/` (voir son `LISEZMOI.md`).
+
+```bash
+cd /opt/inventaire-infra && git pull           # ou le nouvel installeur
+sudo systemd-run --quiet --pty --wait --collect -p User=inventaire \
+    -p WorkingDirectory=/opt/inventaire-infra \
+    -p LoadCredentialEncrypted=inventory_db_password:/etc/inventaire-infra/creds/inventory_db_password.cred \
+    python3 inventory_cli.py --migrer
+sudo mariadb < sql/droits_web.sql
+sudo systemctl restart inventaire-web.service
+```
+
+Avec `db.auto_schema: true`, la collecte applique aussi les migrations en
+attente a chaque passage ; `--migrer` reste le geste explicite du
+deploiement. Tant que la base est en retard sur le code, `/api/sante`
+repond `degrade` (« schema en retard sur le code ») et le journal du
+service donne les deux versions.
+
+Avant une mise a jour qui porte une migration, une sauvegarde :
+`mariadb-dump inventory > inventory-$(date +%F).sql`. Le DDL de MariaDB
+n'est pas transactionnel : une migration interrompue ne se defait pas
+seule, elle se relance (elle est ecrite pour), ou la base se restaure.

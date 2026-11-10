@@ -36,7 +36,7 @@ except ImportError:
     print("PyMySQL manquant.\n"
           "  Debian/Ubuntu : sudo apt install python3-pymysql\n"
           "  sinon         : pip install PyMySQL", file=sys.stderr)
-    raise SystemExit(2)
+    raise SystemExit(2) from None
 
 ALPHABET = string.ascii_letters + string.digits + "-_."
 
@@ -95,7 +95,7 @@ def sql_via_client(client, args, sql):
         r = subprocess.run(cmd, input=sql.encode("utf-8"),
                            capture_output=True, timeout=120)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise SystemExit("echec de l'appel au client : " + str(exc))
+        raise SystemExit("echec de l'appel au client : " + str(exc)) from exc
     if r.returncode != 0:
         raise SystemExit("client en erreur ({}) : {}".format(
             r.returncode, r.stderr.decode("utf-8", "replace").strip()[:400]))
