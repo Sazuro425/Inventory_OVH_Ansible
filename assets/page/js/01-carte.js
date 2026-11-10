@@ -248,7 +248,14 @@ function ajuster() {
 }
 
 const scene = document.getElementById('scene');
+// La fiche et la boite du jeton sont posees sur la scene, mais ne sont pas
+// la carte : un clic, une molette, une selection de texte y restent a elles.
+// Sans ce garde, le deplacement de la carte capturait le pointeur, et ni la
+// croix ni les boutons de la fiche ne recevaient leur clic.
+const surFiche = ev => !!ev.target.closest('.fiche');
+
 scene.addEventListener('wheel', ev => {
+  if (surFiche(ev)) return;          // la fiche defile, la carte ne zoome pas
   ev.preventDefault();
   const r = svg.getBoundingClientRect();
   const sx = ev.clientX - r.left, sy = ev.clientY - r.top;
@@ -265,6 +272,7 @@ scene.addEventListener('wheel', ev => {
 let glisse = null;
 
 scene.addEventListener('pointerdown', ev => {
+  if (surFiche(ev)) return;
   const g = ev.target.closest('.noeud');
   if (ev.target.closest('.plier-grp')) return;
   if (g) {
