@@ -12,6 +12,7 @@ signature est calculee a la main (requests seulement).
 Droits a demander sur le token (lecture pure) :
     GET /dedicated/server*
     GET /vps*
+    GET /services*        (le prix de chaque serveur, pour la rentabilite)
     GET /me               (optionnel : juste pour afficher le compte utilise)
     GET /cloud/project*   (si tu as des projets Public Cloud)
     GET /dedicatedCloud*  (si tu as du Hosted Private Cloud)

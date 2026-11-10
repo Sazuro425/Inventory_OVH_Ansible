@@ -9,9 +9,13 @@ Type=simple
 User=inventaire
 Group=inventaire
 WorkingDirectory=/opt/inventaire-infra
+# --page : en mode local (web.auth: local), c'est le service qui sert la
+# carte, a une session ouverte seulement. En OIDC, Apache la sert lui-meme
+# et l'option ne change rien.
 ExecStart=/usr/bin/python3 /opt/inventaire-infra/serveur_web.py \
           --config /opt/inventaire-infra/infra.yml \
-          --host 127.0.0.1 --port 8080
+          --host 127.0.0.1 --port 8080 \
+          --page /var/www/inventaire/index.html
 
 # Ce service se connecte a la base sous son propre compte, qui n'a aucun
 # droit sur secret_store (voir sql/setup_db.sql). Le nom du compte n'est pas

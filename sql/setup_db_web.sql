@@ -53,6 +53,31 @@ GRANT SELECT, INSERT, UPDATE ON inventory.element
 GRANT SELECT, INSERT, UPDATE ON inventory.surcharge
   TO 'inventory_web'@'localhost';
 
+-- Roles : le catalogue s'etend depuis la page (INSERT), un role retire
+-- repasse actif a 0 (UPDATE) ; l'attribution a une carte se pose et se leve
+-- comme une correction.
+GRANT SELECT, INSERT, UPDATE ON inventory.role
+  TO 'inventory_web'@'localhost';
+GRANT SELECT, INSERT, UPDATE ON inventory.role_carte
+  TO 'inventory_web'@'localhost';
+
+-- Comptes locaux : le service verifie un mot de passe, compte les echecs,
+-- enregistre un changement (SELECT, UPDATE). Il ne cree aucun compte : pas
+-- d'INSERT, c'est inventory_cli.py --compte-local, sous le compte de
+-- collecte, qui le fait. Les sessions, elles, naissent ici.
+GRANT SELECT, UPDATE ON inventory.compte_local
+  TO 'inventory_web'@'localhost';
+GRANT SELECT, INSERT, UPDATE ON inventory.session_locale
+  TO 'inventory_web'@'localhost';
+
+-- Boite de depot des jetons PVE : la clef publique en lecture, le depot en
+-- INSERT. Ni UPDATE (l'etat d'un depot est l'affaire de la collecte), ni
+-- rien sur secret_store, ou atterrit le jeton une fois teste.
+GRANT SELECT ON inventory.cle_depot
+  TO 'inventory_web'@'localhost';
+GRANT SELECT, INSERT ON inventory.depot_jeton
+  TO 'inventory_web'@'localhost';
+
 -- Journal des saisies : INSERT et SELECT seulement. Le service ecrit la
 -- trace de chaque saisie, il ne peut ni la corriger ni l'effacer — meme
 -- entre les mains d'un attaquant.
@@ -100,9 +125,10 @@ SELECT grantee, table_name, privilege_type
 
 -- ---------------------------------------------------------------------------
 -- Verification : les tables en ecriture doivent etre exactement
---   client_token, commercial, element, surcharge,
---   vue_rentabilite                                 INSERT,UPDATE
---   journal_saisie                                  INSERT
+--   client_token, commercial, element, role, role_carte,
+--   session_locale, surcharge, vue_rentabilite      INSERT,UPDATE
+--   compte_local                                    UPDATE
+--   depot_jeton, journal_saisie                     INSERT
 -- ---------------------------------------------------------------------------
 
 SELECT table_name, GROUP_CONCAT(privilege_type ORDER BY privilege_type) AS droits

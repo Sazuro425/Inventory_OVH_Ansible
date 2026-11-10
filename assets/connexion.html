@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Connexion — Inventaire</title>
+<style>
+  :root {
+    --fond:#0d1117; --carte:#161b22; --trait:#30363d; --texte:#e6edf3;
+    --doux:#8b949e; --accent:#2f81f7; --rouge:#f85149; --vert:#3fb950;
+    --ombre:0 0 0 1px rgba(255,255,255,.03), 0 8px 24px rgba(1,4,9,.6);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --fond:#f6f8fa; --carte:#ffffff; --trait:#d1d9e0; --texte:#1f2328;
+      --doux:#59636e; --accent:#0969da; --rouge:#cf222e; --vert:#1a7f37;
+      --ombre:0 1px 3px rgba(31,35,40,.12);
+    }
+  }
+  * { box-sizing:border-box; }
+  html, body { height:100%; }
+  body {
+    margin:0; background:var(--fond); color:var(--texte);
+    font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+    display:flex; align-items:center; justify-content:center; padding:16px;
+  }
+  main {
+    width:100%; max-width:360px; background:var(--carte);
+    border:1px solid var(--trait); border-radius:12px; box-shadow:var(--ombre);
+    padding:24px 24px 20px;
+  }
+  h1 { margin:0 0 2px; font-size:17px; }
+  .sous { margin:0 0 18px; color:var(--doux); font-size:12.5px; }
+  form { display:grid; gap:6px; }
+  form[hidden] { display:none; }
+  label { font-size:12px; color:var(--doux); margin-top:6px; }
+  input {
+    width:100%; font:inherit; color:var(--texte); background:var(--fond);
+    border:1px solid var(--trait); border-radius:8px; padding:8px 10px;
+  }
+  input:focus { outline:2px solid var(--accent); outline-offset:0; border-color:transparent; }
+  button {
+    margin-top:14px; font:inherit; font-weight:600; color:#fff;
+    background:var(--accent); border:0; border-radius:8px; padding:9px 12px;
+    cursor:pointer;
+  }
+  button:disabled { opacity:.6; cursor:default; }
+  .msg { min-height:1.5em; margin:12px 0 0; font-size:12.5px; }
+  .msg.ko { color:var(--rouge); }
+  .msg.ok { color:var(--vert); }
+  .aide { margin:4px 0 0; color:var(--doux); font-size:12px; }
+  [hidden] { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Inventaire</h1>
+  <p class="sous" id="sous">Connexion par compte local</p>
+
+  <form id="f-connexion" autocomplete="on" hidden>
+    <label for="login">Identifiant</label>
+    <input id="login" name="username" autocomplete="username" required
+           autocapitalize="none" spellcheck="false" maxlength="64">
+    <label for="mdp">Mot de passe</label>
+    <input id="mdp" name="password" type="password" autocomplete="current-password"
+           required maxlength="256">
+    <button type="submit">Se connecter</button>
+  </form>
+
+  <form id="f-changer" autocomplete="on" hidden>
+    <p class="aide" id="aide-changer">Choisis ton mot de passe : celui qui t’a été
+      remis ne sert qu’à la première connexion.</p>
+    <div id="bloc-actuel">
+      <label for="actuel">Mot de passe actuel</label>
+      <input id="actuel" type="password" autocomplete="current-password" maxlength="256">
+    </div>
+    <label for="nouveau">Nouveau mot de passe</label>
+    <input id="nouveau" type="password" autocomplete="new-password" required
+           minlength="12" maxlength="256" aria-describedby="regle">
+    <p class="aide" id="regle">12 caractères au moins, sans ton identifiant.
+      Une phrase de plusieurs mots fait très bien l’affaire.</p>
+    <label for="confirme">Encore une fois</label>
+    <input id="confirme" type="password" autocomplete="new-password" required maxlength="256">
+    <button type="submit">Enregistrer et continuer</button>
+  </form>
+
+  <p class="msg" id="msg" role="alert" aria-live="assertive"></p>
+</main>
+<script>
+// Rien d'autre que /api/connexion, /api/mot-de-passe et /api/moi : la page
+// ne porte aucune donnee de l'inventaire, elle n'en recoit qu'apres connexion.
+const $ = id => document.getElementById(id);
+let connu = null;          // le mot de passe qui vient d'ouvrir la session
+
+function dire(texte, ok) {
+  $('msg').textContent = texte || '';
+  $('msg').className = 'msg ' + (ok ? 'ok' : 'ko');
+}
+
+function montrer(quoi, login) {
+  $('f-connexion').hidden = quoi !== 'connexion';
+  $('f-changer').hidden = quoi !== 'changer';
+  if (quoi === 'changer') {
+    $('sous').textContent = 'Compte ' + login;
+    // juste saisi pour se connecter : inutile de le redemander
+    $('bloc-actuel').hidden = connu !== null;
+    $('actuel').required = connu === null;
+    (connu === null ? $('actuel') : $('nouveau')).focus();
+  } else {
+    $('sous').textContent = 'Connexion par compte local';
+    $('login').focus();
+  }
+}
+
+async function envoyer(url, corps) {
+  const r = await fetch(url, { method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
+  const rep = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(rep.erreur || ('refus (' + r.status + ')'));
+  return rep;
+}
+
+async function occupe(f, travail) {
+  const b = f.querySelector('button');
+  b.disabled = true;
+  try { await travail(); }
+  catch (e) { dire(e.message === 'Failed to fetch' ? 'le service ne répond pas' : e.message); }
+  finally { b.disabled = false; }
+}
+
+$('f-connexion').onsubmit = ev => {
+  ev.preventDefault();
+  dire('');
+  occupe(ev.target, async () => {
+    const rep = await envoyer('/api/connexion',
+                              { login: $('login').value, mot_de_passe: $('mdp').value });
+    if (rep.doit_changer) {
+      connu = $('mdp').value;
+      $('mdp').value = '';
+      montrer('changer', rep.utilisateur);
+      dire('');
+      return;
+    }
+    location.replace('/');
+  });
+};
+
+$('f-changer').onsubmit = ev => {
+  ev.preventDefault();
+  dire('');
+  const nouveau = $('nouveau').value;
+  if (nouveau !== $('confirme').value) {
+    dire('les deux saisies diffèrent');
+    $('confirme').focus();
+    return;
+  }
+  occupe(ev.target, async () => {
+    await envoyer('/api/mot-de-passe',
+                  { actuel: connu !== null ? connu : $('actuel').value, nouveau });
+    connu = null;
+    dire('mot de passe enregistré', true);
+    location.replace('/');
+  });
+};
+
+// Une session ouverte dont le mot de passe reste a changer arrive ici
+// directement ; une session saine repart vers la carte, sauf si elle vient
+// changer son mot de passe de son plein gre (?changer).
+(async () => {
+  try {
+    const r = await fetch('/api/moi', { headers: { Accept: 'application/json' } });
+    if (r.ok) {
+      const m = await r.json();
+      if (m.doit_changer || location.search === '?changer') {
+        montrer('changer', m.utilisateur);
+        return;
+      }
+      location.replace('/');
+      return;
+    }
+  } catch (e) { /* service muet : le formulaire le dira a l'envoi */ }
+  montrer('connexion');
+})();
+</script>
+</body>
+</html>

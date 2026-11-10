@@ -223,13 +223,15 @@ CREATE TABLE IF NOT EXISTS commercial (
 -- parent_ref vaut, selon parent_type : le nom du cluster, le nom OVH du
 -- serveur, le nom de la VM, ou l'id d'un autre element.
 --
+-- role est un code du catalogue role (site, applicatif, licence...), ou NULL.
+--
 -- Comme pour commercial, rien n'est supprime : actif passe a 0.
 CREATE TABLE IF NOT EXISTS element (
   id           INT AUTO_INCREMENT PRIMARY KEY,
   parent_type  ENUM('cluster','serveur','vm','element') NOT NULL,
   parent_ref   VARCHAR(190)  NOT NULL,
   nom          VARCHAR(190)  NOT NULL,
-  genre        VARCHAR(40)   NULL,
+  role         VARCHAR(40)   NULL,
   contrat      VARCHAR(100)  NULL,
   client       VARCHAR(190)  NULL,
   prix_vente   DECIMAL(10,2) NOT NULL DEFAULT 0,
@@ -265,6 +267,124 @@ CREATE TABLE IF NOT EXISTS surcharge (
   maj_le       DATETIME      NOT NULL,
   maj_par      VARCHAR(190)  NOT NULL,
   PRIMARY KEY (cible_type, cible_ref, champ)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
+-- Roles : ce que fait une machine ou un element. Serveur web, LAMP, proxy,
+-- applicatif pour un hyperviseur ou une VM ; site, domaine, licence pour un
+-- element.
+--
+-- Un catalogue plutot qu'un texte libre : sinon "LAMP", "lamp" et "serveur
+-- lamp" font trois lignes dans un filtre et trois totaux dans un export. On
+-- l'etend depuis la page (role commercial) ; rien n'en est supprime, un role
+-- passe a actif = 0 et les cartes qui le portent le gardent.
+CREATE TABLE IF NOT EXISTS role (
+  code         VARCHAR(40)   NOT NULL PRIMARY KEY,
+  libelle      VARCHAR(80)   NOT NULL,
+  actif        TINYINT(1)    NOT NULL DEFAULT 1,
+  cree_le      DATETIME      NOT NULL,
+  cree_par     VARCHAR(190)  NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Le catalogue de depart. INSERT IGNORE : rejouer le schema ne touche pas a
+-- un libelle renomme depuis.
+INSERT IGNORE INTO role (code, libelle, cree_le, cree_par) VALUES
+  ('web',         'Serveur web',            NOW(), 'schema'),
+  ('lamp',        'Serveur LAMP',           NOW(), 'schema'),
+  ('proxy',       'Proxy / reverse proxy',  NOW(), 'schema'),
+  ('applicatif',  'Applicatif',             NOW(), 'schema'),
+  ('bdd',         'Base de données',        NOW(), 'schema'),
+  ('mail',        'Messagerie',             NOW(), 'schema'),
+  ('dns',         'DNS',                    NOW(), 'schema'),
+  ('stockage',    'Stockage',               NOW(), 'schema'),
+  ('sauvegarde',  'Sauvegarde',             NOW(), 'schema'),
+  ('supervision', 'Supervision',            NOW(), 'schema'),
+  ('site',        'Site web',               NOW(), 'schema'),
+  ('vhost',       'Vhost',                  NOW(), 'schema'),
+  ('domaine',     'Domaine',                NOW(), 'schema'),
+  ('licence',     'Licence',                NOW(), 'schema'),
+  ('ip',          'Adresse IP',             NOW(), 'schema'),
+  ('autre',       'Autre',                  NOW(), 'schema');
+
+-- Le role d'une carte que la collecte connait : un cluster, un serveur (donc
+-- son hyperviseur), une VM. Un element porte le sien dans element.role.
+-- role a NULL leve l'attribution ; comme pour surcharge, la ligne reste.
+CREATE TABLE IF NOT EXISTS role_carte (
+  cible_type   ENUM('cluster','serveur','vm') NOT NULL,
+  cible_ref    VARCHAR(190)  NOT NULL,
+  role         VARCHAR(40)   NULL,
+  maj_le       DATETIME      NOT NULL,
+  maj_par      VARCHAR(190)  NOT NULL,
+  PRIMARY KEY (cible_type, cible_ref)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
+-- Comptes locaux : l'authentification tant que l'OIDC n'est pas branche
+-- (web.auth: local dans infra.yml). Voir auth_locale.py.
+--
+-- empreinte est un scrypt sale, jamais le mot de passe. Un compte se cree
+-- par `inventory_cli.py --compte-local LOGIN`, sous le compte de collecte :
+-- le compte web peut mettre a jour un compte (mot de passe, echecs), pas en
+-- creer.
+CREATE TABLE IF NOT EXISTS compte_local (
+  login               VARCHAR(64)   NOT NULL PRIMARY KEY,
+  empreinte           VARCHAR(255)  NOT NULL,
+  roles               VARCHAR(100)  NOT NULL,
+  doit_changer        TINYINT(1)    NOT NULL DEFAULT 1,
+  actif               TINYINT(1)    NOT NULL DEFAULT 1,
+  echecs              INT           NOT NULL DEFAULT 0,
+  bloque_jusqu_a      DATETIME      NULL,
+  derniere_connexion  DATETIME      NULL,
+  cree_le             DATETIME      NOT NULL,
+  cree_par            VARCHAR(190)  NOT NULL,
+  maj_le              DATETIME      NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Sessions des comptes locaux. La base ne garde que le sha256 du jeton
+-- pose dans le cookie : une copie de cette table ne rouvre aucune session.
+-- Une session close passe revoquee = 1, comme ailleurs rien n'est efface.
+CREATE TABLE IF NOT EXISTS session_locale (
+  empreinte    CHAR(64)      NOT NULL PRIMARY KEY,
+  login        VARCHAR(64)   NOT NULL,
+  cree_le      DATETIME      NOT NULL,
+  vu_le        DATETIME      NOT NULL,
+  expire_le    DATETIME      NOT NULL,
+  revoquee     TINYINT(1)    NOT NULL DEFAULT 0,
+  origine      VARCHAR(45)   NULL,
+  INDEX idx_session_login (login, revoquee)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
+-- Boite de depot scellee des jetons PVE (voir depot_scelle.py).
+--
+-- cle_depot : la clef PUBLIQUE de depot, que le service web lit pour
+-- sceller. La privee est dans secret_store (depot_cle_privee), chiffree par
+-- la clef maitresse : seule la collecte l'ouvre.
+CREATE TABLE IF NOT EXISTS cle_depot (
+  version      INT           NOT NULL PRIMARY KEY,
+  publique     VARBINARY(32) NOT NULL,
+  actif        TINYINT(1)    NOT NULL DEFAULT 1,
+  cree_le      DATETIME      NOT NULL,
+  cree_par     VARCHAR(190)  NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- depot_jeton : un jeton scelle par hyperviseur, en attente de la collecte
+-- qui l'ouvre, le teste, et le range dans secret_store ou le refuse avec
+-- son motif. Le service web y depose (INSERT) et lit l'etat ; il ne peut ni
+-- ouvrir un depot, ni en changer l'etat.
+CREATE TABLE IF NOT EXISTS depot_jeton (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  hote         VARCHAR(190)  NOT NULL,
+  cle_version  INT           NOT NULL,
+  scelle       VARBINARY(600) NOT NULL,
+  depose_le    DATETIME      NOT NULL,
+  depose_par   VARCHAR(190)  NOT NULL,
+  etat         ENUM('en_attente','accepte','refuse','remplace')
+                             NOT NULL DEFAULT 'en_attente',
+  traite_le    DATETIME      NULL,
+  motif        VARCHAR(300)  NULL,
+  INDEX idx_depot_hote (hote, id),
+  INDEX idx_depot_etat (etat)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ---------------------------------------------------------------------------
@@ -321,6 +441,10 @@ ALTER TABLE server_snapshot
   ADD COLUMN IF NOT EXISTS ram_mb      INT           NULL,
   ADD COLUMN IF NOT EXISTS disk_count  INT           NULL,
   ADD COLUMN IF NOT EXISTS disk_desc   VARCHAR(300)  NULL;
+
+-- element.genre (texte libre) est devenu element.role (code du catalogue).
+-- Sans effet si la table a ete creee avec role.
+ALTER TABLE element CHANGE COLUMN IF EXISTS genre role VARCHAR(40) NULL;
 
 ALTER TABLE node_snapshot
   ADD COLUMN IF NOT EXISTS cpu_model     VARCHAR(190)  NULL,

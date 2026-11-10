@@ -150,6 +150,19 @@ def ecrire(conn, nom, valeur, par, cle=None, cle_version=None):
     return v
 
 
+def nom_secret_pve(hote):
+    """Nom du secret pour un hote. Doit coller a ce qu'on met dans infra.yml.
+
+    Garder la meme transformation partout — inventory_cli --pve, la boite de
+    depot, la collecte qui cherche un jeton depose —, sinon la reference
+    `db:` ne resout rien.
+    """
+    if not hote:
+        return "pve_token"
+    propre = "".join(c if c.isalnum() else "_" for c in hote.lower())
+    return "pve_token_" + propre.strip("_")
+
+
 def lister(conn):
     if conn is None:
         raise SecretErreur("connexion absente")

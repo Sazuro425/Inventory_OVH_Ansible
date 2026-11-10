@@ -182,6 +182,24 @@
   .vente li .prix { color:var(--vert); font-variant-numeric:tabular-nums; }
   .vente li .rien { color:var(--doux); font-style:italic; }
   .vente li button { padding:1px 7px; font-size:11px; }
+  .hotes-depot { max-height:230px; overflow-y:auto; border:1px solid var(--trait);
+                 border-radius:7px; padding:6px 8px; display:grid; gap:3px; }
+  .hotes-depot label.case { font-size:11.5px; }
+  .vente ul.liste-recolte { max-height:55vh; }
+  .tiroir details { margin:0 0 10px; font-size:12px; }
+  .tiroir details summary { cursor:pointer; color:var(--accent); }
+  .tiroir details pre { margin:8px 0 6px; }
+  .etat-recolte { font-size:10.5px; border:1px solid var(--trait); border-radius:999px;
+                  padding:0 7px; white-space:nowrap; color:var(--doux); }
+  .etat-recolte.ok { color:var(--vert); border-color:var(--vert); }
+  .etat-recolte.ko { color:var(--rouge); border-color:var(--rouge); }
+  .etat-recolte.attente { color:var(--ambre); border-color:var(--ambre); }
+  .vente li .role { font-size:10px; color:var(--doux); border:1px solid var(--trait);
+                    border-radius:999px; padding:0 6px; white-space:nowrap; }
+  .vente .total-enfants { font-size:11.5px; color:var(--doux); margin:-4px 0 6px;
+                          font-variant-numeric:tabular-nums; }
+  .saisie .total-lot { font-size:12px; color:var(--texte); margin:2px 0 0;
+                       font-variant-numeric:tabular-nums; line-height:1.5; }
 
   .vente form { display:grid; gap:6px; margin-top:8px; }
   .vente form label { font-size:11px; color:var(--doux); }
@@ -286,7 +304,8 @@
     color:var(--doux); border:1px solid var(--trait); border-radius:4px;
     padding:0 5px; margin-right:7px; vertical-align:1px;
   }
-  .arbre tr.r-element .genre { border-color:var(--accent); color:var(--accent); }
+  .arbre tr.r-element .genre, .arbre .genre.role {
+    border-color:var(--accent); color:var(--accent); }
   .arbre td.nom small { color:var(--doux); margin-left:8px; font-size:11px; }
   .arbre .alerte { color:var(--ambre); margin-left:6px; cursor:help; }
   .arbre td.corrige::after { content:" ✎"; color:var(--ambre); }
@@ -512,6 +531,7 @@
     <button id="btn-ajuster" title="Ajuster à l'écran">Ajuster</button>
     <button id="btn-reinit" title="Réinitialiser positions et filtres">Réinitialiser</button>
     <button id="btn-jeton" title="Obtenir un jeton pour le client">Jeton</button>
+    <button id="btn-recolte" hidden title="Jetons PVE de la récolte, hyperviseur par hyperviseur">Récolte</button>
     <button id="btn-theme" title="Thème clair ou sombre">◐</button>
     <div class="moi" id="moi" hidden></div>
   </div>
@@ -577,7 +597,7 @@
            placeholder="Filtrer : nom, contrat, client…">
     <label class="puce seul-filtre"><input type="checkbox" id="rent-perte"> à perte</label>
     <label class="puce seul-filtre"><input type="checkbox" id="rent-alertes"> avec alerte</label>
-    <button id="rent-btn-filtres" title="Clusters, datacenters, clients, genres">Filtres</button>
+    <button id="rent-btn-filtres" title="Clusters, datacenters, clients, rôles">Filtres</button>
     <button id="rent-deplier" class="seul-arbre">Tout déplier</button>
     <span class="pousse"></span>
     <button id="rent-journal" title="Qui a saisi quoi, et quand">Journal</button>
@@ -645,13 +665,15 @@
     photo : dans un cluster, les VM migrent d’un nœud à l’autre ; celui du
     cluster est le chiffre stable.
   </p>
-  <aside class="fiche tiroir" id="tiroir" aria-live="polite">
-    <button class="fermer" id="tiroir-fermer" title="Fermer">✕</button>
-    <h3 id="tiroir-titre"></h3>
-    <div class="type" id="tiroir-type"></div>
-    <div class="vente" id="tiroir-corps"></div>
-  </aside>
 </section>
+<!-- le tiroir de saisie sert aux deux vues : la fiche d'un hyperviseur
+     dans le schema l'ouvre aussi, il ne vit donc pas dans #vue-rent -->
+<aside class="fiche tiroir" id="tiroir" aria-live="polite">
+  <button class="fermer" id="tiroir-fermer" title="Fermer">✕</button>
+  <h3 id="tiroir-titre"></h3>
+  <div class="type" id="tiroir-type"></div>
+  <div class="vente" id="tiroir-corps"></div>
+</aside>
 <div class="flash" id="flash" role="status" aria-live="polite"></div>
 <div class="viz-bulle" id="viz-bulle" role="tooltip" hidden></div>
 
@@ -998,6 +1020,7 @@ document.getElementById('fiche-fermer').onclick = () => {
 // volet se tait. La topologie doit rester consultable sans lui.
 const commerce = {
   dispo: false, peutEcrire: false, globale: null, arbre: [], orphelins: [],
+  roles: [],             // le catalogue : [{ code, libelle }]
   index: new Map(),      // "type:cle" -> { carte, chemin }
   ouverts: new Set(),    // chemins depliés dans la vue
   premier: true,
@@ -1037,6 +1060,12 @@ const LIBELLE = { cluster: 'Cluster', serveur: 'Serveur', vm: 'VM',
                   element: 'Élément' };
 const cleIndex = c => c.type + ':' + c.cle;
 
+// le libelle d'un role ; un code retire du catalogue reste lisible tel quel
+function libelleRole(code) {
+  const r = commerce.roles.find(x => x.code === code);
+  return r ? r.libelle : code;
+}
+
 function indexer() {
   commerce.index = new Map();
   const visiter = (c, chemin) => {
@@ -1061,6 +1090,7 @@ async function chargerCommerce() {
     commerce.globale = rent.globale || null;
     commerce.arbre = rent.arbre || [];
     commerce.orphelins = rent.orphelins || [];
+    commerce.roles = rent.roles || [];
     commerce.peutEcrire = !!rent.peut_ecrire;
     indexer();
     if (commerce.premier) {
@@ -1112,7 +1142,14 @@ function carteDe(n) {
   return null;
 }
 
+// la fiche d'une carte du schema : son bilan commercial, puis, pour un
+// admin, l'etat de sa recolte PVE
 function ficheCommerce(n) {
+  ficheVente(n);
+  ficheRecolte(n);
+}
+
+function ficheVente(n) {
   const zone = document.getElementById('fiche-vente');
   zone.replaceChildren();
   if (!commerce.dispo) return;
@@ -1130,10 +1167,53 @@ function ficheCommerce(n) {
     ligne('ROI', signe(cl.carte.roi), classeMarge(cl.carte.roi));
   }
   if (c.type === 'vm') listeContrats(d, c);
-  d.appendChild(el('div', { className: 'actions' },
-    el('button', { textContent: 'Voir dans la rentabilité',
-                   onclick: () => basculerMode('arbre', trouve.chemin) })));
+  listeEnfants(d, c);
+  const actions = el('div', { className: 'actions' });
+  if (commerce.peutEcrire) {
+    actions.append(
+      el('button', { textContent: 'Prix et rôle…', title: 'Coût, prix de vente, rôle'
+                       + (c.type === 'serveur' ? ', cluster' : ''),
+                     onclick: () => formCorrection(c) }),
+      el('button', { textContent: '+ Enfants…',
+                     title: 'Déclarer des sites, vhosts, licences… sous ' + c.nom,
+                     onclick: () => formEnfants(c) }));
+  }
+  actions.appendChild(el('button', { textContent: 'Voir dans la rentabilité',
+                                     onclick: () => basculerMode('arbre', trouve.chemin) }));
+  d.appendChild(actions);
   zone.appendChild(d);
+}
+
+// Les enfants declares a la main sous la carte : sites d'une VM LAMP,
+// licence d'un serveur. Les VM ont leur propre carte dans le schema.
+function listeEnfants(d, c) {
+  const enfants = c.enfants.filter(e => e.type === 'element');
+  if (!enfants.length && !commerce.peutEcrire) return;
+  d.appendChild(el('h5', { textContent: 'Enfants déclarés'
+                                        + (enfants.length ? ' · ' + enfants.length : '') }));
+  if (!enfants.length) {
+    d.appendChild(el('p', { className: 'lecture', textContent:
+      'Aucun. Sites, vhosts, licences… se déclarent avec « + Enfants ».' }));
+    return;
+  }
+  const ul = el('ul');
+  for (const e of enfants) {
+    const li = el('li', null,
+      el('span', { className: 'nom', textContent: e.nom,
+                   title: [e.nom, e.infos.client, e.infos.contrat].filter(Boolean).join(' · ') }),
+      e.infos.role_libelle ? el('span', { className: 'role', textContent: e.infos.role_libelle })
+                           : null,
+      el('span', { className: 'prix', textContent: euro(e.pv) }));
+    if (commerce.peutEcrire) {
+      li.appendChild(el('button', { textContent: 'Éditer', onclick: () => formElement(null, e) }));
+    }
+    ul.appendChild(li);
+  }
+  d.appendChild(ul);
+  const pv = enfants.reduce((t, e) => t + e.pv, 0);
+  const pa = enfants.reduce((t, e) => t + e.pa, 0);
+  d.appendChild(el('p', { className: 'total-enfants', textContent:
+    'Les enfants rapportent ' + euro(pv) + ' / mois' + (pa ? ', coûtent ' + euro(pa) : '') }));
 }
 
 function grille(d) {
@@ -1148,6 +1228,7 @@ function grille(d) {
 
 function bilanCarte(d, c) {
   const ligne = grille(d);
+  if (c.infos.role_libelle) ligne('Rôle', c.infos.role_libelle);
   ligne('PA', euro(c.pa) + (c.corrections.prix_achat ? ' ✎' : ''));
   ligne('CA', euro(c.pv) + (c.corrections.prix_vente ? ' ✎' : ''));
   ligne('ROI', signe(c.roi), classeMarge(c.roi));
@@ -1353,9 +1434,12 @@ function ligneRent(c, prof, chemin, ouvert) {
     td.appendChild(el('span', { className: 'pli vide' }));
   }
   td.appendChild(el('span', { className: 'genre', textContent:
-    c.type === 'element' ? (c.infos.genre || 'élément')
+    c.type === 'element' ? (c.infos.role_libelle || 'élément')
     : c.type === 'cluster' && c.infos.seul ? 'nœud seul'
     : LIBELLE[c.type] }));
+  if (c.type !== 'element' && c.infos.role_libelle) {
+    td.appendChild(el('span', { className: 'genre role', textContent: c.infos.role_libelle }));
+  }
   td.appendChild(el('span', { className: 'titre', textContent: c.nom }));
   const sous = [];
   if (c.type === 'cluster' && c.infos.manuel) sous.push('regroupement manuel');
@@ -1400,14 +1484,15 @@ function ligneRent(c, prof, chemin, ouvert) {
 function actionsCarte(c) {
   const act = el('td', { className: 'act' });
   if (commerce.peutEcrire) {
-    act.appendChild(el('button', { textContent: '+ enfant',
-      title: 'Déclarer un élément sous ' + c.nom,
-      onclick: () => formElement(c, null) }));
+    act.appendChild(el('button', { textContent: '+ enfants',
+      title: 'Déclarer un ou plusieurs éléments sous ' + c.nom,
+      onclick: () => formEnfants(c) }));
     if (c.type === 'element') {
       act.appendChild(el('button', { textContent: 'Éditer',
                                      onclick: () => formElement(null, c) }));
     } else {
-      act.appendChild(el('button', { textContent: 'Corriger',
+      act.appendChild(el('button', { textContent: 'Modifier',
+                                     title: 'Prix et rôle',
                                      onclick: () => formCorrection(c) }));
     }
     if (c.type === 'vm') {
@@ -1447,8 +1532,8 @@ const COLONNES_PLAT = [
     val: r => r.serveur },
   { id: 'parent', titre: 'Rattaché à', niv: ['element'],
     val: r => r.parent },
-  { id: 'genre', titre: 'Genre', niv: ['element'],
-    val: r => r.c.infos.genre },
+  { id: 'role', titre: 'Rôle', niv: ['cluster', 'serveur', 'vm', 'element', 'tout'],
+    val: r => r.c.infos.role_libelle },
   { id: 'offre', titre: 'Offre', niv: ['serveur'], val: r => r.c.infos.offre },
   { id: 'dc', titre: 'DC', niv: ['cluster', 'serveur'],
     val: r => r.c.infos.datacenter || (r.c.infos.datacenters || []).join(' ') },
@@ -2100,15 +2185,17 @@ for (const f of FIGURES) {
 // graphiques ne gardent que les cartes qui passent. Un filtre choisit des
 // cartes ; il ne recalcule pas leurs montants, qui restent ceux de l'API.
 const selection = { clusters: new Set(), datacenters: new Set(),
-                    clients: new Set(), genres: new Set() };
+                    clients: new Set(), roles: new Set() };
 const CRITERES = [['clusters', 'Clusters'], ['datacenters', 'Datacenters'],
-                  ['clients', 'Clients'], ['genres', 'Genres d’élément']];
+                  ['clients', 'Clients'], ['roles', 'Rôles']];
+// une valeur de filtre telle qu'on la lit : le libelle pour un role
+const libelleValeur = (k, v) => k === 'roles' ? libelleRole(v) : v;
 let cacheLignes = { arbre: null, lignes: [], parCarte: new Map() };
 
 // L'arbre aplati, chaque carte avec son contexte : groupe, serveur, parent,
-// datacenters, et les clients et genres qu'elle porte ou que portent ses
+// datacenters, et les clients et roles qu'elle porte ou que portent ses
 // descendants — c'est ce qui permet de garder un cluster parce qu'un site
-// d'un client choisi y tourne.
+// d'un client choisi y tourne, ou un serveur parce qu'il heberge une VM LAMP.
 function aplatir() {
   if (cacheLignes.arbre === commerce.arbre) return cacheLignes.lignes;
   const out = [];
@@ -2117,7 +2204,7 @@ function aplatir() {
     const ici = chemin.concat([cleIndex(c)]);
     const r = { c, chemin: ici, ordre: ordre++, cluster: ctx.cluster,
                 groupe: ctx.groupe, serveur: ctx.serveur, parent: ctx.parent,
-                dcs: ctx.dcs, clients: new Set(), genres: new Set() };
+                dcs: ctx.dcs, clients: new Set(), roles: new Set() };
     if (c.type === 'cluster') {
       r.cluster = c.infos.seul ? '' : c.nom;
       r.groupe = libelleGroupe(c);
@@ -2125,10 +2212,8 @@ function aplatir() {
     }
     if (c.type === 'serveur' && c.infos.datacenter) r.dcs = new Set([c.infos.datacenter]);
     if (c.type === 'vm') contrats(c).forEach(v => v.client && r.clients.add(v.client));
-    if (c.type === 'element') {
-      if (c.infos.client) r.clients.add(c.infos.client);
-      if (c.infos.genre) r.genres.add(c.infos.genre);
-    }
+    if (c.type === 'element' && c.infos.client) r.clients.add(c.infos.client);
+    if (c.infos.role) r.roles.add(c.infos.role);
     r.nbVm = compterVm(c);
     out.push(r);
     const sous = { cluster: r.cluster, groupe: r.groupe, dcs: r.dcs,
@@ -2137,7 +2222,7 @@ function aplatir() {
     for (const e of c.enfants) {
       const re = visiter(e, sous, ici);
       re.clients.forEach(x => r.clients.add(x));
-      re.genres.forEach(x => r.genres.add(x));
+      re.roles.forEach(x => r.roles.add(x));
     }
     return r;
   };
@@ -2158,9 +2243,9 @@ function correspondRent(r) {
   if (selection.clusters.size && !selection.clusters.has(r.groupe)) return false;
   if (selection.datacenters.size && !croise(r.dcs, selection.datacenters)) return false;
   if (selection.clients.size && !croise(r.clients, selection.clients)) return false;
-  if (selection.genres.size && !croise(r.genres, selection.genres)) return false;
+  if (selection.roles.size && !croise(r.roles, selection.roles)) return false;
   const f = vueRent.filtre;
-  if (f && ![r.c.nom, r.cluster, r.serveur, r.parent,
+  if (f && ![r.c.nom, r.cluster, r.serveur, r.parent, r.c.infos.role_libelle,
              r.c.infos.client, r.c.infos.contrat,
              ...contrats(r.c).map(v => v.contrat + ' ' + (v.client || ''))]
       .some(x => String(x || '').toLowerCase().includes(f))) return false;
@@ -2170,7 +2255,7 @@ function correspondRent(r) {
 }
 
 const filtreDeParc = () => selection.clusters.size || selection.datacenters.size
-  || selection.genres.size || vueRent.filtre || vueRent.perte || vueRent.alertes;
+  || selection.roles.size || vueRent.filtre || vueRent.perte || vueRent.alertes;
 const filtreRentActif = () => filtreDeParc() || selection.clients.size;
 
 function lignesFiltrees(type) {
@@ -2197,12 +2282,13 @@ function valeursCritere(k) {
     if (k === 'clusters' && r.c.type === 'cluster') v.add(r.groupe);
     if (k === 'datacenters') r.dcs.forEach(x => v.add(x));
     if (k === 'clients') r.clients.forEach(x => v.add(x));
-    if (k === 'genres') r.genres.forEach(x => v.add(x));
+    if (k === 'roles') r.roles.forEach(x => v.add(x));
   }
   // une valeur choisie reste affichee meme si elle a disparu du parc : sinon
   // on ne pourrait plus la decocher
   selection[k].forEach(x => v.add(x));
-  return [...v].sort((a, b) => a.localeCompare(b, 'fr', { numeric: true }));
+  return [...v].sort((a, b) => libelleValeur(k, a)
+    .localeCompare(libelleValeur(k, b), 'fr', { numeric: true }));
 }
 
 function construireFiltresRent() {
@@ -2214,7 +2300,7 @@ function construireFiltresRent() {
     const grp = el('div', { className: 'groupe' }, el('label', { textContent: titre }));
     for (const v of valeurs) {
       const p = el('button', { className: 'puce' + (selection[k].has(v) ? ' choisi' : ''),
-        textContent: v, ariaPressed: String(selection[k].has(v)),
+        textContent: libelleValeur(k, v), ariaPressed: String(selection[k].has(v)),
         onclick: () => {
           if (selection[k].has(v)) selection[k].delete(v); else selection[k].add(v);
           apresFiltre();
@@ -2381,7 +2467,8 @@ document.getElementById('vue-enregistrer').onclick = () => {
   resume.appendChild(el('li', { textContent: 'Présentation : ' + d.mode
     + (d.niveau ? ', niveau ' + d.niveau : '') + (d.tri ? ', tri ' + d.tri : '') }));
   for (const [k, titre] of CRITERES) {
-    if (d[k]) resume.appendChild(el('li', { textContent: titre + ' : ' + d[k].join(', ') }));
+    if (d[k]) resume.appendChild(el('li', { textContent: titre + ' : '
+      + d[k].map(x => libelleValeur(k, x)).join(', ') }));
   }
   if (d.texte) resume.appendChild(el('li', { textContent: 'Texte : ' + d.texte }));
   if (d.perte) resume.appendChild(el('li', { textContent: 'À perte seulement' }));
@@ -2509,8 +2596,107 @@ function flash(texte) {
   flash.t = setTimeout(() => z.classList.remove('visible'), 2600);
 }
 
-const GENRES = ['site', 'vhost', 'domaine', 'boîte mail', 'base de données',
-                'licence', 'sauvegarde', 'stockage', 'IP', 'autre'];
+// Le choix d'un role : le catalogue, et de quoi l'etendre sans quitter le
+// formulaire. code() rend le code retenu, en creant le role au besoin ; un
+// role cree reste cree meme si la saisie qui suit est refusee, et le
+// formulaire le selectionne pour qu'un nouvel envoi ne le recree pas.
+function choixRole(f, actuel, etiquette) {
+  const id = 'c-' + Math.random().toString(36).slice(2, 8);
+  const s = el('select', { id });
+  s.appendChild(el('option', { value: '', textContent: '— aucun —' }));
+  for (const r of commerce.roles) {
+    s.appendChild(el('option', { value: r.code, textContent: r.libelle,
+                                 selected: r.code === actuel }));
+  }
+  if (actuel && !commerce.roles.some(r => r.code === actuel)) {
+    s.appendChild(el('option', { value: actuel, selected: true,
+                                 textContent: actuel + ' (retiré du catalogue)' }));
+  }
+  const plus = el('option', { value: '+', textContent: '＋ Nouveau rôle…' });
+  s.appendChild(plus);
+  const nouveau = el('input', { type: 'text', maxLength: 80, hidden: true,
+                                placeholder: 'nom du rôle, ex. Serveur Node.js' });
+  s.onchange = () => {
+    nouveau.hidden = s.value !== '+';
+    if (!nouveau.hidden) nouveau.focus();
+  };
+  f.append(el('label', { textContent: etiquette || 'Rôle', htmlFor: id }), s, nouveau);
+  return {
+    change: () => s.value !== (actuel || ''),
+    async code() {
+      if (s.value !== '+') return s.value;
+      if (!nouveau.value.trim()) throw new Error('donne un nom au nouveau rôle');
+      const r = (await poster('/api/roles', { libelle: nouveau.value })).role;
+      commerce.roles.push(r);
+      s.insertBefore(el('option', { value: r.code, textContent: r.libelle }), plus);
+      s.value = r.code;
+      nouveau.hidden = true;
+      return r.code;
+    },
+  };
+}
+
+// Plusieurs enfants d'un coup sous la meme carte : un nom par ligne, le reste
+// en commun. « La VM A heberge 4 sites a 40 € » : quatre lignes, 40 €, et le
+// formulaire annonce ce que la carte rapportera avant qu'on enregistre.
+function formEnfants(parent) {
+  const corps = ouvrirTiroir('Ajouter des enfants',
+    'sous ' + LIBELLE[parent.type].toLowerCase() + ' ' + parent.nom);
+  const f = el('form', { autocomplete: 'off', className: 'saisie' });
+  const noms = champ(f, 'Noms — un par ligne', { tag: 'textarea', rows: 5,
+    required: true, placeholder: 'boutique.exemple.fr\nblog.exemple.fr' });
+  // sous une VM, on declare surtout des sites
+  const role = choixRole(f, parent.type === 'vm'
+    && commerce.roles.some(r => r.code === 'site') ? 'site' : null);
+  const paire = el('div', { className: 'paire' });
+  const pv = el('input', { type: 'number', step: '0.01', min: '0',
+                           placeholder: 'PV de chacun', ariaLabel: 'Prix de vente de chacun' });
+  const pa = el('input', { type: 'number', step: '0.01', min: '0',
+                           placeholder: 'PA de chacun', ariaLabel: 'Prix d’achat de chacun' });
+  paire.append(pv, pa);
+  f.append(el('label', { textContent: 'Prix de vente · prix d’achat, de chacun' }), paire);
+  const per = periode(f);
+  const client = champ(f, 'Client (facultatif, le même pour tous)',
+                       { type: 'text', maxLength: 190 });
+  const total = el('p', { className: 'total-lot', ariaLive: 'polite' });
+  f.appendChild(total);
+
+  const lister = () => noms.value.split('\n').map(x => x.trim()).filter(Boolean);
+  const maj = () => {
+    const n = lister().length;
+    if (!n) { total.textContent = 'Aucun nom saisi.'; return; }
+    const div = per.value === 'an' ? 12 : 1;
+    const v = Number(pv.value || 0) / div, a = Number(pa.value || 0) / div;
+    total.replaceChildren(
+      el('b', { textContent: n + ' enfant' + (n > 1 ? 's' : '') + ' × ' + euro(v)
+                             + ' = ' + euro(n * v) + ' / mois' }),
+      a ? ' (PA ' + euro(n * a) + ')' : '',
+      el('br'),
+      LIBELLE[parent.type] + ' ' + parent.nom + ' : CA ' + euro(parent.pv) + ' → ',
+      el('b', { textContent: euro(parent.pv + n * v) }),
+      ', ROI ', el('b', { className: 'marge ' + classeMarge(parent.roi + n * (v - a)),
+                          textContent: signe(parent.roi + n * (v - a)) }));
+  };
+  [noms, pv, pa, per].forEach(x => x.addEventListener('input', maj));
+  maj();
+
+  f.appendChild(el('div', { className: 'actions' },
+    el('button', { type: 'submit', textContent: 'Enregistrer' }),
+    el('button', { type: 'button', textContent: 'Annuler', onclick: fermerTiroir })));
+  f.onsubmit = ev => {
+    ev.preventDefault();
+    const liste = lister();
+    soumettre(f, async () => {
+      await poster('/api/elements', {
+        parent_type: parent.type, parent_ref: parent.cle, noms: liste,
+        role: await role.code(), prix_vente: pv.value, prix_achat: pa.value,
+        periode: per.value, client: client.value,
+      });
+    }, liste.length > 1 ? liste.length + ' enfants déclarés.' : 'Enfant déclaré.');
+  };
+  corps.appendChild(f);
+  noms.focus();
+}
 
 // parent : la carte sous laquelle on declare ; existant : l'element a editer
 function formElement(parent, existant) {
@@ -2521,12 +2707,7 @@ function formElement(parent, existant) {
   const f = el('form', { autocomplete: 'off', className: 'saisie' });
   const nom = champ(f, 'Nom', { type: 'text', required: true, maxLength: 190,
     value: existant ? existant.nom : '', placeholder: 'ex. boutique.exemple.fr' });
-  const genre = champ(f, 'Genre', { type: 'text', maxLength: 40,
-    value: info ? (info.genre || '') : '', placeholder: 'site, vhost, domaine…' });
-  const liste = el('datalist', { id: 'genres' },
-    ...GENRES.map(g => el('option', { value: g })));
-  f.appendChild(liste);
-  genre.setAttribute('list', 'genres');
+  const role = choixRole(f, info ? info.role : null);
   const paire = el('div', { className: 'paire' });
   const pv = el('input', { type: 'number', step: '0.01', min: '0',
     placeholder: 'PV', value: info ? (info.prix_vente || '') : '' });
@@ -2559,7 +2740,7 @@ function formElement(parent, existant) {
   f.onsubmit = ev => {
     ev.preventDefault();
     const charge = {
-      nom: nom.value, genre: genre.value, prix_vente: pv.value,
+      nom: nom.value, prix_vente: pv.value,
       prix_achat: pa.value, periode: per.value, contrat: contrat.value,
       client: client.value, note: noteTxt.value,
     };
@@ -2569,21 +2750,25 @@ function formElement(parent, existant) {
     } else {
       Object.assign(charge, { parent_type: parent.type, parent_ref: parent.cle });
     }
-    soumettre(f, () => poster('/api/element', charge),
-              existant ? 'Élément corrigé.' : 'Élément déclaré.');
+    soumettre(f, async () => {
+      charge.role = await role.code();
+      await poster('/api/element', charge);
+    }, existant ? 'Élément corrigé.' : 'Élément déclaré.');
   };
   corps.appendChild(f);
   nom.focus();
 }
 
-// Corriger : remplace la valeur PROPRE de la carte. Les enfants continuent
-// de s'ajouter par-dessus, le tiroir le rappelle.
+// Modifier : le role de la carte, et ses prix. Un prix remplace la valeur
+// PROPRE de la carte ; les enfants continuent de s'ajouter par-dessus, le
+// tiroir le rappelle.
 function formCorrection(c) {
-  const corps = ouvrirTiroir('Corriger ' + c.nom, LIBELLE[c.type]);
+  const corps = ouvrirTiroir('Modifier ' + c.nom, LIBELLE[c.type]);
   corps.appendChild(el('p', { className: 'lecture', textContent:
-    'La correction remplace la valeur propre de la carte ; ses enfants '
-    + 'continuent de s’y ajouter. Un champ vidé lève la correction.' }));
+    'Un prix remplace la valeur propre de la carte ; ses enfants '
+    + 'continuent de s’y ajouter. Un prix vidé lève la correction.' }));
   const f = el('form', { autocomplete: 'off', className: 'saisie' });
+  const role = choixRole(f, c.infos.role);
   const champs = [];
   const auto = {
     prix_achat: c.type === 'serveur' ? c.pa_auto : null,
@@ -2619,7 +2804,7 @@ function formCorrection(c) {
     }
     champs.push({ k, i, avant: actuel === null || actuel === undefined ? '' : String(actuel) });
   }
-  const motif = champ(f, 'Motif (obligatoire)', { type: 'text', required: true,
+  const motif = champ(f, 'Motif (obligatoire pour un prix)', { type: 'text',
     maxLength: 300, placeholder: 'ex. tarif négocié, licence Windows…' });
   f.appendChild(el('div', { className: 'actions' },
     el('button', { type: 'submit', textContent: 'Enregistrer' }),
@@ -2627,16 +2812,24 @@ function formCorrection(c) {
   f.onsubmit = ev => {
     ev.preventDefault();
     const changes = champs.filter(x => x.i.value.trim() !== x.avant);
-    if (!changes.length) { message(f, 'rien n’a changé', false); return; }
+    if (!changes.length && !role.change()) { message(f, 'rien n’a changé', false); return; }
+    if (changes.length && !motif.value.trim()) {
+      message(f, 'un prix corrigé demande un motif', false);
+      motif.focus();
+      return;
+    }
     soumettre(f, async () => {
+      if (role.change()) {
+        await poster('/api/role', { cible_type: c.type, cible_ref: c.cle,
+                                    role: await role.code() });
+      }
       for (const x of changes) {
         await poster('/api/surcharge', { cible_type: c.type, cible_ref: c.cle,
           champ: x.k, valeur: x.i.value.trim(), motif: motif.value });
       }
-    }, changes.length > 1 ? 'Corrections enregistrées.' : 'Correction enregistrée.');
+    }, 'Modifications enregistrées.');
   };
   corps.appendChild(f);
-  (champs[0] || {}).i && champs[0].i.focus();
 }
 
 function formVente(vm, existant) {
@@ -2996,10 +3189,206 @@ async function chargerMoi() {
       zone.appendChild(el('a', { className: 'bouton', textContent: 'Se déconnecter',
         href: m.deconnexion + encodeURIComponent(location.origin + '/') }));
     }
+    if (m.locale) {
+      // compte local : la session vit dans le service, c'est lui qui la ferme
+      zone.append(
+        el('a', { className: 'bouton', textContent: 'Mot de passe',
+                  href: '/connexion?changer' }),
+        el('button', { textContent: 'Se déconnecter', onclick: async () => {
+          await fetch('/api/deconnexion', { method: 'POST',
+            headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+          location.replace('/connexion');
+        } }));
+    }
     zone.hidden = false;
     document.getElementById('btn-jeton').hidden = !m.peut_emettre_jeton;
+    droits.admin = m.roles.includes('admin');
+    document.getElementById('btn-recolte').hidden = !droits.admin;
+    if (droits.admin) chargerRecolte();
   } catch (e) { /* page ouverte sans son service : rien a montrer */ }
 }
+
+// --------------------------------------------------------- recolte PVE
+// Les jetons PVE se deposent ici, hyperviseur par hyperviseur. Le service
+// les scelle avec la clef publique de depot des reception : il ne peut plus
+// les relire. La collecte suivante les ouvre, les teste sur l'hyperviseur,
+// et les range chiffres ou les refuse avec leur motif — que cette vue
+// affiche au passage suivant.
+const droits = { admin: false };
+const recolte = { data: null };
+
+async function chargerRecolte() {
+  try {
+    const r = await fetch('/api/recolte', { headers: { Accept: 'application/json' } });
+    if (!r.ok) throw new Error('http ' + r.status);
+    recolte.data = await r.json();
+  } catch (e) {
+    recolte.data = null;
+  }
+  if (etat.selection) {
+    const n = parId.get(etat.selection);
+    if (n) ficheCommerce(n);
+  }
+}
+
+function hoteDe(n) {
+  const srv = n.kind === 'srv' ? n : (n.kind === 'node' ? parId.get(n.parent) : null);
+  return srv && recolte.data
+    ? recolte.data.hotes.find(h => h.ovh_name === srv.ovh) || null : null;
+}
+
+function etatRecolte(h) {
+  if (h.ignore) return { texte: 'ignoré (skip)', classe: '' };
+  if (!h.sonde) return { texte: 'non sondé', classe: '' };
+  if (!h.joignable) return { texte: 'injoignable', classe: 'ko' };
+  return { texte: 'joignable', classe: 'ok' };
+}
+
+function sourceJeton(h) {
+  const d = h.depot;
+  if (d && d.etat === 'en_attente') {
+    return { texte: 'déposé le ' + d.depose_le + ' par ' + d.depose_par
+                    + ', testé à la prochaine collecte', classe: 'attente' };
+  }
+  if (h.jeton_infra_yml) return { texte: 'nommé dans infra.yml', classe: '' };
+  if (d && d.etat === 'accepte') {
+    return { texte: 'déposé par ' + d.depose_par + ', accepté le ' + d.traite_le,
+             classe: 'ok' };
+  }
+  if (d && d.etat === 'refuse') {
+    return { texte: 'dépôt refusé le ' + d.traite_le + ' : ' + (d.motif || '?'),
+             classe: 'ko' };
+  }
+  return { texte: 'jeton par défaut (default_token)', classe: '' };
+}
+
+function ficheRecolte(n) {
+  if (!droits.admin || !recolte.data) return;
+  const h = hoteDe(n);
+  if (!h) return;
+  const d = el('div', { className: 'vente' }, el('h4', { textContent: 'Récolte PVE' }));
+  const ligne = grille(d);
+  const e = etatRecolte(h), j = sourceJeton(h);
+  ligne('État', e.texte + (h.cluster ? ' · cluster ' + h.cluster : ''));
+  ligne('Jeton', j.texte);
+  if (h.erreur) d.appendChild(el('p', { className: 'lecture alerte', textContent: '⚠ ' + h.erreur }));
+  if (recolte.data.pret) {
+    d.appendChild(el('div', { className: 'actions' },
+      el('button', { textContent: 'Déposer un jeton…', onclick: () => formDepot([h.hote]) })));
+  }
+  document.getElementById('fiche-vente').appendChild(d);
+}
+
+const trierRecolte = hotes => [...hotes].sort((a, b) =>
+  (a.joignable - b.joignable) || a.hote.localeCompare(b.hote, 'fr', { numeric: true }));
+
+async function afficherRecolte() {
+  const corps = ouvrirTiroir('Récolte PVE', 'jetons par hyperviseur');
+  await chargerRecolte();
+  const d = recolte.data;
+  if (!d) {
+    corps.appendChild(el('p', { className: 'msg ko', textContent: 'état de la récolte illisible' }));
+    return;
+  }
+  const actifs = d.hotes.filter(h => !h.ignore);
+  const ko = actifs.filter(h => !h.joignable).length;
+  const attente = actifs.filter(h => h.depot && h.depot.etat === 'en_attente').length;
+  corps.appendChild(el('p', { className: 'lecture', textContent:
+    actifs.length + ' hyperviseur(s) : ' + (actifs.length - ko) + ' joignable(s), '
+    + ko + ' injoignable(s)' + (attente ? ', ' + attente + ' dépôt(s) en attente' : '')
+    + '. Photo de la collecte du ' + new Date(d.genere_le * 1000).toLocaleString('fr-FR') + '.' }));
+  if (!d.pret) {
+    corps.appendChild(el('p', { className: 'msg ko', textContent:
+      'Boîte de dépôt pas encore initialisée : sur la VM, inventory_cli.py --init-depot.' }));
+  } else if (!d.jetons_deposes) {
+    corps.appendChild(el('p', { className: 'msg ko', textContent:
+      'pve.jetons_deposes est désactivé dans infra.yml : un jeton accepté ne servira pas.' }));
+  }
+  const ul = el('ul', { className: 'liste-recolte' });
+  for (const h of trierRecolte(actifs)) {
+    const e = etatRecolte(h), j = sourceJeton(h);
+    const li = el('li', null,
+      el('span', { className: 'nom', textContent: h.hote,
+                   title: [h.hote, h.cluster && 'cluster ' + h.cluster, h.erreur, j.texte]
+                     .filter(Boolean).join('\n') }),
+      el('span', { className: 'etat-recolte ' + e.classe, textContent: e.texte }),
+      j.classe ? el('span', { className: 'etat-recolte ' + j.classe, textContent:
+        { attente: 'en attente', ok: 'déposé', ko: 'refusé' }[j.classe] }) : null);
+    if (d.pret) li.appendChild(el('button', { textContent: 'Déposer',
+                                              onclick: () => formDepot([h.hote]) }));
+    ul.appendChild(li);
+  }
+  corps.appendChild(ul);
+  if (d.pret) {
+    corps.appendChild(el('div', { className: 'actions' },
+      el('button', { textContent: 'Déposer pour plusieurs…', onclick: () => formDepot([]) })));
+  }
+}
+
+const COMMANDES_PVE = [
+  'pveum user add inventory@pve --comment "inventaire, lecture seule"',
+  'pveum aclmod / --user inventory@pve --role PVEAuditor',
+  'pveum user token add inventory@pve readonly --privsep 0',
+].join('\n');
+
+function formDepot(choisis) {
+  const d = recolte.data;
+  const corps = ouvrirTiroir('Déposer un jeton PVE',
+    choisis.length === 1 ? choisis[0] : 'plusieurs hyperviseurs');
+  corps.appendChild(el('p', { className: 'lecture', textContent:
+    'Scellé dès réception : ce service ne peut plus le relire. La prochaine '
+    + 'collecte le teste sur chaque hyperviseur coché, puis le range chiffré '
+    + 'ou le refuse avec son motif.' }));
+  corps.appendChild(el('details', null,
+    el('summary', { textContent: 'Créer le compte de récolte sur l’hyperviseur' }),
+    el('pre', { textContent: COMMANDES_PVE }),
+    el('button', { type: 'button', textContent: 'Copier les commandes',
+      onclick: () => navigator.clipboard.writeText(COMMANDES_PVE)
+        .then(() => flash('Commandes copiées.'), () => flash('Copie refusée par le navigateur.')) }),
+    el('p', { className: 'lecture', textContent:
+      'Sur un seul nœud par cluster : compte et jeton valent pour tout le cluster. '
+      + 'Lecture seule (PVEAuditor). pveum n’affiche la valeur qu’une fois.' })));
+
+  const f = el('form', { autocomplete: 'off', className: 'saisie' });
+  const ident = champ(f, 'Identifiant du jeton (full-tokenid)', { type: 'text',
+    value: 'inventory@pve!readonly', maxLength: 160, required: true, spellcheck: false });
+  const secret = champ(f, 'Valeur du jeton (value)', { type: 'password',
+    autocomplete: 'off', required: true, maxLength: 36, spellcheck: false,
+    placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' });
+
+  // les noeuds d'un meme cluster partagent compte et jeton : coches d'office
+  const clusters = new Set(d.hotes.filter(h => choisis.includes(h.hote) && h.cluster)
+                                  .map(h => h.cluster));
+  const coches = new Set(choisis);
+  d.hotes.forEach(h => { if (h.cluster && clusters.has(h.cluster)) coches.add(h.hote); });
+  const liste = el('div', { className: 'hotes-depot' });
+  const cases = [];
+  for (const h of trierRecolte(d.hotes.filter(x => !x.ignore))) {
+    const c = el('input', { type: 'checkbox', value: h.hote, checked: coches.has(h.hote) });
+    cases.push(c);
+    liste.appendChild(el('label', { className: 'case' }, c,
+      h.hote + (h.cluster ? ' · ' + h.cluster : '') + (h.joignable ? '' : ' · injoignable')));
+  }
+  f.append(el('label', { textContent: 'Hyperviseurs' }), liste);
+  f.appendChild(el('div', { className: 'actions' },
+    el('button', { type: 'submit', textContent: 'Sceller et déposer' }),
+    el('button', { type: 'button', textContent: 'Annuler', onclick: fermerTiroir })));
+  f.onsubmit = ev => {
+    ev.preventDefault();
+    const hotes = cases.filter(c => c.checked).map(c => c.value);
+    if (!hotes.length) { message(f, 'coche au moins un hyperviseur', false); return; }
+    const jeton = ident.value.trim() + '=' + secret.value.trim();
+    soumettre(f, async () => {
+      await poster('/api/recolte/jeton', { hotes, jeton });
+      secret.value = '';
+      await chargerRecolte();
+    }, 'Jeton scellé pour ' + hotes.length + ' hyperviseur(s) : testé à la prochaine collecte.');
+  };
+  corps.appendChild(f);
+  secret.focus();
+}
+
+document.getElementById('btn-recolte').onclick = afficherRecolte;
 
 // Le cookie OIDC a expire : Apache repond 401 a l'API (OIDCUnAuthAction).
 // Recharger la page repasse par Authentik, qui rouvre la session.

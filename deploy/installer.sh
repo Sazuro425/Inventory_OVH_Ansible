@@ -199,12 +199,23 @@ installer_unite inventaire-collecte.service
 faire systemctl daemon-reload
 
 # --------------------------------------------------------------------------
+# web.auth: local -> le service authentifie, vhost sans OIDC ; sinon OIDC
+AUTH_LOCALE=0
+grep -Eq '^[[:space:]]+auth:[[:space:]]*local' "$PREFIXE/infra.yml" 2>/dev/null \
+  && AUTH_LOCALE=1
 if [[ $AVEC_APACHE -eq 1 ]]; then
   etape "Apache"
   if command -v apache2ctl >/dev/null; then
-    faire a2enmod headers proxy proxy_http
+    faire a2enmod ssl headers proxy proxy_http
     sauvegarder /etc/apache2/sites-available/inventaire.conf
-    faire cp "$SOURCE/deploy/apache-inventaire.conf" \
+    if [[ $AUTH_LOCALE -eq 1 ]]; then
+      vhost=apache-inventaire-local.conf
+      vert "   web.auth: local -> comptes locaux, sans OIDC"
+    else
+      vhost=apache-inventaire.conf
+      vert "   web.auth: oidc -> Authentik par mod_auth_openidc"
+    fi
+    faire cp "$SOURCE/deploy/$vhost" \
              /etc/apache2/sites-available/inventaire.conf
     jaune "   vhost depose : ajuste ServerName avant d'activer"
     jaune "   puis : a2ensite inventaire && apache2ctl configtest && systemctl reload apache2"
@@ -233,6 +244,8 @@ RESTE+=("verifier la separation : les deux requetes en fin de setup_db_web.sql d
 RESTE+=("eprouver la collecte : python3 infra_inventory.py --refresh --seulement 'ns1234*' --table")
 RESTE+=("chiffrer les secrets : ./deploy/chiffrer-secrets.sh, puis basculer les unites en LoadCredentialEncrypted")
 RESTE+=("si secrets en base : python3 inventory_cli.py --init-key | systemd-creds encrypt --name=master_key - /etc/inventaire-infra/creds/master_key.cred")
+RESTE+=("pour deposer les jetons PVE depuis la page : python3 inventory_cli.py --init-depot, sous le compte de collecte (docs/deploiement.md, 7)")
+[[ $AUTH_LOCALE -eq 1 ]] && RESTE+=("creer le compte admin (mot de passe affiche une fois) : python3 inventory_cli.py --compte-local admin, sous le compte de collecte (docs/deploiement.md, 9a)")
 RESTE+=("le detail de tout cela : $PREFIXE/docs/deploiement.md")
 [[ $AVEC_TIMER -eq 1 ]] && RESTE+=("activer la collecte : systemctl enable --now inventaire-collecte.timer")
 [[ $AVEC_WEB -eq 1 ]] && RESTE+=("activer le service web : systemctl enable --now inventaire-web.service")

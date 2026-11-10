@@ -34,7 +34,9 @@ ont leur propre ligne de commande et leurs sorties `table` / `csv` / `json`.
 ### 1. Accès OVH
 
 Créer un token sur <https://api.ovh.com/createToken/> avec au minimum
-`GET /dedicated/server*` et `GET /vps*`, puis renseigner `~/.ovh.conf` :
+`GET /dedicated/server*`, `GET /vps*` et `GET /services*` (le prix de
+chaque serveur, sans lequel la rentabilité n'a aucun coût), puis renseigner
+`~/.ovh.conf` :
 
 ```ini
 [ovh-eu]

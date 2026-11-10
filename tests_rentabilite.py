@@ -81,10 +81,20 @@ def vente(vm, prix, contrat, periode="mois", cluster=None):
             "periode": periode, "devise": "EUR", "cluster_name": cluster}
 
 
-def element(id_, parent_type, parent_ref, nom, pv=0, pa=0, periode="mois"):
+def element(id_, parent_type, parent_ref, nom, pv=0, pa=0, periode="mois",
+            role=None):
     return {"id": id_, "parent_type": parent_type, "parent_ref": parent_ref,
             "nom": nom, "prix_vente": pv, "prix_achat": pa,
-            "periode": periode, "devise": "EUR"}
+            "periode": periode, "devise": "EUR", "role": role}
+
+
+def role(type_, ref, code):
+    return {"cible_type": type_, "cible_ref": ref, "role": code}
+
+
+CATALOGUE = [{"code": "lamp", "libelle": "Serveur LAMP"},
+             {"code": "site", "libelle": "Site web"},
+             {"code": "proxy", "libelle": "Proxy / reverse proxy"}]
 
 
 def correction(type_, ref, champ, valeur, motif="test"):
@@ -220,6 +230,53 @@ def _():
 # --------------------------------------------------------------------------
 # Enfants declares
 # --------------------------------------------------------------------------
+
+@test("une VM LAMP et ses 4 sites a 40 EUR : 160 EUR, roles lisibles")
+def _():
+    data = {"servers": [serveur(1)], "probes": [sonde(1, "prod", "pve-1")],
+            "guests": [invite("vm-a", 100, "prod", "pve-1", 1),
+                       invite("rp1", 101, "prod", "pve-1", 1)],
+            "costs": [cout(1, 90)]}
+    sites = [element(i, "vm", "vm-a", "site{}.fr".format(i), pv=40, role="site")
+             for i in range(1, 5)]
+    r = R.calculer(data, (), sites,
+                   roles=[role("vm", "vm-a", "lamp"), role("serveur",
+                          "ns1.ovh.net", "proxy")],
+                   catalogue=CATALOGUE)
+    a = trouve(r["arbre"], "prod", "ns1.eu", "vm-a")
+    egal(a["pv"], 160.0, "ce que la VM rapporte")
+    egal(a["infos"]["role"], "lamp")
+    egal(a["infos"]["role_libelle"], "Serveur LAMP")
+    egal({e["infos"]["role_libelle"] for e in a["enfants"]}, {"Site web"})
+    egal(trouve(r["arbre"], "prod", "ns1.eu")["infos"]["role"], "proxy",
+         "le role de l'hyperviseur")
+    egal(trouve(r["arbre"], "prod", "ns1.eu", "rp1")["infos"]["role"], None,
+         "une VM sans role")
+    egal(r["arbre"][0]["roi"], 70.0, "ROI du cluster : 160 - 90")
+    ligne = [l for l in R.lignes(r) if l["Nom"].strip() == "vm-a"][0]
+    egal(ligne["Rôle"], "Serveur LAMP", "colonne Rôle du CSV")
+
+
+@test("un role retire du catalogue reste lisible par son code")
+def _():
+    data = {"servers": [serveur(1)], "probes": [sonde(1, "prod", "pve-1")],
+            "guests": [invite("vm-a", 100, "prod", "pve-1", 1)], "costs": []}
+    r = R.calculer(data, roles=[role("vm", "vm-a", "ancien")],
+                   catalogue=CATALOGUE)
+    egal(trouve(r["arbre"], "prod", "ns1.eu", "vm-a")["infos"]["role_libelle"],
+         "ancien")
+
+
+@test("deux VM homonymes : le role va a celle qui porte les contrats")
+def _():
+    data = {"servers": [serveur(1), serveur(2)],
+            "probes": [sonde(1, "alpha", "a1"), sonde(2, "beta", "b1")],
+            "guests": [invite("web", 100, "alpha", "a1", 1),
+                       invite("web", 100, "beta", "b1", 2)],
+            "costs": []}
+    r = R.calculer(data, roles=[role("vm", "web", "lamp")], catalogue=CATALOGUE)
+    egal(trouve(r["arbre"], "alpha", "ns1.eu", "web")["infos"]["role"], "lamp")
+    egal(trouve(r["arbre"], "beta", "ns2.eu", "web")["infos"]["role"], None)
 
 @test("environnement mutualise : 20 sites sous web6 remontent jusqu'au cluster")
 def _():

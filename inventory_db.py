@@ -16,6 +16,8 @@ import datetime as dt
 import decimal
 import json
 import os
+import re
+import unicodedata
 from pathlib import Path
 
 import secrets_infra
@@ -603,7 +605,8 @@ def lister_ventes(conn, vm=None, actives=True):
 
 
 def lire_saisies(conn):
-    """Ce que les humains ont saisi : ventes actives, elements, corrections.
+    """Ce que les humains ont saisi : ventes actives, elements, corrections,
+    roles poses sur les cartes, et le catalogue des roles.
 
     Une table absente (schema pas encore rejoue) rend une liste vide plutot
     qu'une erreur : le calcul reste possible, simplement sans ces saisies.
@@ -612,6 +615,9 @@ def lire_saisies(conn):
         "ventes": "SELECT * FROM v_vente_active",
         "elements": "SELECT * FROM element WHERE actif = 1",
         "surcharges": "SELECT * FROM surcharge WHERE valeur IS NOT NULL",
+        "roles": "SELECT * FROM role_carte WHERE role IS NOT NULL",
+        "catalogue": "SELECT code, libelle FROM role WHERE actif = 1 "
+                     "ORDER BY libelle",
     }
     out = {}
     with conn.cursor() as cur:
@@ -639,7 +645,9 @@ def rentabilite(conn):
         raise DbError("aucun snapshot en base : lance une collecte")
     saisies = lire_saisies(conn)
     res = calcul.calculer(data, saisies["ventes"], saisies["elements"],
-                          saisies["surcharges"])
+                          saisies["surcharges"], saisies["roles"],
+                          saisies["catalogue"])
+    res["roles"] = saisies["catalogue"]
     res["snapshot"] = data["run_id"]
     res["genere_le"] = data["generated_at"]
     return res
@@ -652,7 +660,7 @@ def rentabilite(conn):
 PARENTS = ("cluster", "serveur", "vm", "element")
 CIBLES = ("cluster", "serveur", "vm")
 CHAMPS = ("prix_achat", "prix_vente", "cluster")
-CHAMPS_ELEMENT = ("parent_type", "parent_ref", "nom", "genre", "contrat",
+CHAMPS_ELEMENT = ("parent_type", "parent_ref", "nom", "role", "contrat",
                   "client", "prix_vente", "prix_achat", "devise", "periode",
                   "note")
 
@@ -683,7 +691,7 @@ def verifier_element(e):
         "parent_ref": _texte(e.get("parent_ref"), "le parent", 190,
                              obligatoire=True),
         "nom": _texte(e.get("nom"), "le nom", 190, obligatoire=True),
-        "genre": _texte(e.get("genre"), "le genre", 40),
+        "role": code_role(e.get("role")),
         "contrat": _texte(e.get("contrat"), "le contrat", 100),
         "client": _texte(e.get("client"), "le client", 190),
         "prix_vente": _prix(e.get("prix_vente"), "le prix de vente"),
@@ -700,6 +708,16 @@ def verifier_element(e):
     return propre
 
 
+def _inserer_element(cur, e, par, maintenant):
+    cur.execute(
+        "INSERT INTO element ({}, actif, cree_le, cree_par) "
+        "VALUES ({}, 1, %s, %s)".format(
+            ", ".join(CHAMPS_ELEMENT), ", ".join(["%s"] * len(CHAMPS_ELEMENT))),
+        [e[c] for c in CHAMPS_ELEMENT] + [maintenant, par])
+    e["id"] = cur.lastrowid
+    journaliser(cur, par, "element", "element {}".format(e["id"]), None, e)
+
+
 def enregistrer_element(conn, element, par):
     """Cree un element, ou corrige celui dont l'id est donne."""
     e = verifier_element(element)
@@ -707,15 +725,10 @@ def enregistrer_element(conn, element, par):
     valeurs = [e[c] for c in CHAMPS_ELEMENT]
     try:
         with conn.cursor() as cur:
+            _role_existe(cur, e["role"])
             if e["id"] is None:
-                cur.execute(
-                    "INSERT INTO element ({}, actif, cree_le, cree_par) "
-                    "VALUES ({}, 1, %s, %s)".format(
-                        ", ".join(CHAMPS_ELEMENT),
-                        ", ".join(["%s"] * len(CHAMPS_ELEMENT))),
-                    valeurs + [maintenant, par])
-                e["id"] = cur.lastrowid
-                avant, cree = None, True
+                _inserer_element(cur, e, par, maintenant)
+                cree = True
             else:
                 cur.execute("SELECT * FROM element WHERE id = %s AND actif = 1 "
                             "FOR UPDATE", (e["id"],))
@@ -728,8 +741,8 @@ def enregistrer_element(conn, element, par):
                         ", ".join(c + " = %s" for c in CHAMPS_ELEMENT)),
                     valeurs + [maintenant, par, e["id"]])
                 cree = False
-            journaliser(cur, par, "element", "element {}".format(e["id"]),
-                        avant, e)
+                journaliser(cur, par, "element", "element {}".format(e["id"]),
+                            avant, e)
     except VenteInvalide:
         conn.rollback()
         raise
@@ -738,6 +751,54 @@ def enregistrer_element(conn, element, par):
         raise _traduit(exc, "l'enregistrement de l'element") from exc
     conn.commit()
     return dict(e, cree=cree)
+
+
+LOT_MAX = 200
+
+
+def verifier_lot(lot):
+    """Plusieurs enfants d'un coup : une liste de noms, le reste en commun.
+
+    "La VM A heberge 4 sites a 40 EUR" : noms = les 4 sites, prix_vente = 40.
+    Chaque element est controle comme s'il etait saisi seul. Renvoie la
+    liste des dicts a ecrire.
+    """
+    noms = lot.get("noms")
+    if not isinstance(noms, list):
+        raise VenteInvalide("noms attend une liste")
+    noms = [n.strip() if isinstance(n, str) else n for n in noms]
+    noms = [n for n in noms if n not in (None, "")]
+    if not noms:
+        raise VenteInvalide("aucun nom : un enfant par ligne")
+    if len(noms) > LOT_MAX:
+        raise VenteInvalide("{} enfants au plus par saisie".format(LOT_MAX))
+    vus = set()
+    for n in noms:
+        cle = str(n).lower()
+        if cle in vus:
+            raise VenteInvalide("nom en double dans la saisie : {}".format(n))
+        vus.add(cle)
+    commun = {k: lot.get(k) for k in CHAMPS_ELEMENT if k != "nom"}
+    return [verifier_element(dict(commun, nom=n)) for n in noms]
+
+
+def enregistrer_elements(conn, lot, par):
+    """Cree un lot d'elements sous le meme parent, tout ou rien."""
+    propres = verifier_lot(lot)
+    maintenant = dt.datetime.now()
+    try:
+        with conn.cursor() as cur:
+            _role_existe(cur, propres[0]["role"])
+            for e in propres:
+                _inserer_element(cur, e, par, maintenant)
+    except VenteInvalide:
+        conn.rollback()
+        raise
+    except pymysql.Error as exc:
+        conn.rollback()
+        raise _traduit(exc, "l'enregistrement des elements") from exc
+    conn.commit()
+    return propres
 
 
 def retirer_element(conn, ident, par):
@@ -824,12 +885,128 @@ def poser_surcharge(conn, surcharge, par):
 
 
 # ---------------------------------------------------------------------------
+# Roles : le catalogue, et le role d'une carte
+# ---------------------------------------------------------------------------
+
+CIBLES_ROLE = ("cluster", "serveur", "vm")
+_CODE_ROLE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
+
+
+def code_role(v):
+    """Un code de role tel qu'il circule : minuscules, sans espace. Vide
+    donne None. L'existence dans le catalogue se verifie en base."""
+    if v in (None, ""):
+        return None
+    code = str(v).strip().lower()
+    if not _CODE_ROLE.match(code):
+        raise VenteInvalide("code de role illisible : lettres, chiffres, - et _")
+    return code
+
+
+def code_depuis_libelle(libelle):
+    """« Serveur LAMP » donne serveur-lamp. Les accents tombent, le reste
+    devient un tiret."""
+    t = unicodedata.normalize("NFKD", libelle).encode("ascii", "ignore")
+    return re.sub(r"[^a-z0-9]+", "-", t.decode().lower()).strip("-")[:40].strip("-")
+
+
+def verifier_role(r):
+    """Une entree du catalogue. Le code se deduit du libelle s'il manque."""
+    libelle = _texte(r.get("libelle"), "le libelle du role", 80,
+                     obligatoire=True)
+    code = code_role(r.get("code")) or code_depuis_libelle(libelle)
+    if not code:
+        raise VenteInvalide("le libelle doit contenir une lettre ou un chiffre")
+    return {"code": code, "libelle": libelle}
+
+
+def verifier_role_carte(r):
+    cible_type = (r.get("cible_type") or "").strip()
+    if cible_type not in CIBLES_ROLE:
+        raise VenteInvalide("cible inconnue : attendu " + ", ".join(CIBLES_ROLE))
+    return {
+        "cible_type": cible_type,
+        "cible_ref": _texte(r.get("cible_ref"), "la cible", 190,
+                            obligatoire=True),
+        "role": code_role(r.get("role")),        # None leve le role
+    }
+
+
+def _role_existe(cur, code):
+    """Refuse un role absent du catalogue, ou retire. None passe."""
+    if code is None:
+        return
+    cur.execute("SELECT actif FROM role WHERE code = %s", (code,))
+    r = cur.fetchone()
+    if not r or not r["actif"]:
+        raise VenteInvalide("role inconnu : " + code)
+
+
+def creer_role(conn, role, par):
+    """Ajoute un role au catalogue. Un role retire se reactive."""
+    r = verifier_role(role)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM role WHERE code = %s FOR UPDATE",
+                        (r["code"],))
+            avant = cur.fetchone()
+            if avant and avant["actif"]:
+                raise VenteInvalide("le role existe deja : {}".format(
+                    avant["libelle"]))
+            if avant:
+                cur.execute("UPDATE role SET actif = 1, libelle = %s "
+                            "WHERE code = %s", (r["libelle"], r["code"]))
+            else:
+                cur.execute("INSERT INTO role (code, libelle, actif, cree_le, "
+                            "cree_par) VALUES (%s, %s, 1, %s, %s)",
+                            (r["code"], r["libelle"], dt.datetime.now(), par))
+            journaliser(cur, par, "role", "catalogue " + r["code"], avant, r)
+    except VenteInvalide:
+        conn.rollback()
+        raise
+    except pymysql.Error as exc:
+        conn.rollback()
+        raise _traduit(exc, "l'ajout du role") from exc
+    conn.commit()
+    return r
+
+
+def poser_role(conn, attribution, par):
+    """Pose le role d'un cluster, d'un serveur ou d'une VM ; None le leve."""
+    a = verifier_role_carte(attribution)
+    cible = "{} {}".format(a["cible_type"], a["cible_ref"])
+    try:
+        with conn.cursor() as cur:
+            _role_existe(cur, a["role"])
+            cur.execute("SELECT role FROM role_carte WHERE cible_type = %s "
+                        "AND cible_ref = %s FOR UPDATE",
+                        (a["cible_type"], a["cible_ref"]))
+            avant = cur.fetchone()
+            cur.execute(
+                "INSERT INTO role_carte (cible_type, cible_ref, role, maj_le, "
+                "maj_par) VALUES (%s, %s, %s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE role = VALUES(role), "
+                "maj_le = VALUES(maj_le), maj_par = VALUES(maj_par)",
+                (a["cible_type"], a["cible_ref"], a["role"],
+                 dt.datetime.now(), par))
+            journaliser(cur, par, "role", cible, avant, {"role": a["role"]})
+    except VenteInvalide:
+        conn.rollback()
+        raise
+    except pymysql.Error as exc:
+        conn.rollback()
+        raise _traduit(exc, "le role") from exc
+    conn.commit()
+    return a
+
+
+# ---------------------------------------------------------------------------
 # Vues de rentabilite enregistrees
 # ---------------------------------------------------------------------------
 
 MODES_VUE = ("arbre", "tableau", "graphiques")
 NIVEAUX_VUE = ("cluster", "serveur", "vm", "element", "tout")
-LISTES_VUE = ("clusters", "datacenters", "clients", "genres")
+LISTES_VUE = ("clusters", "datacenters", "clients", "roles")
 
 
 def verifier_vue(v):

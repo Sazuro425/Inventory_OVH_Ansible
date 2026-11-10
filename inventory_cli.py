@@ -8,6 +8,11 @@ inventory - administration des secrets de l'inventaire.
     inventory --pve HOTE             renouvelle le jeton d'un hyperviseur
     inventory --db                   change le mot de passe de la base
     inventory --rotate-key           rechiffre tout sous une nouvelle clef
+    inventory --init-depot           tire la clef de la boite de depot PVE
+    inventory --traiter-depots       teste et range les jetons deposes depuis
+                                     la page (collecte.sh le lance)
+    inventory --compte-local LOGIN   cree ou reinitialise un compte local
+              [--roles admin,commercial]   (web.auth: local, sans OIDC)
 
 Trois regles valent pour toutes les sous-commandes.
 
@@ -358,16 +363,88 @@ def commande_ovh(args, conf, conn, cle):
     return 0
 
 
-def nom_secret_pve(hote):
-    """Nom du secret pour un hote. Doit coller a ce qu'on met dans infra.yml.
+# la collecte cherche les jetons deposes sous ce meme nom
+nom_secret_pve = secret_store.nom_secret_pve
 
-    Garder la meme transformation des deux cotes, sinon la reference `db:`
-    de la configuration ne resout rien.
+
+def commande_init_depot(args, conf, conn, cle):
+    """Tire la paire de la boite de depot scellee."""
+    import depot_scelle
+    actuelle = depot_scelle.cle_publique(conn)
+    if actuelle and not args.force:
+        erreur("une clef de depot existe deja (v{}). La remplacer rend "
+               "illisibles les depots en attente ; --force pour le faire."
+               .format(actuelle[0]))
+        return 1
+    v = depot_scelle.initialiser(conn, cle, utilisateur())
+    print()
+    print("  clef de depot v{} :".format(v))
+    print("    privee   secret_store, {} (chiffree par la clef maitresse)"
+          .format(depot_scelle.NOM_CLE_PRIVEE))
+    print("    publique cle_depot (le service web la lit pour sceller)")
+    return 0
+
+
+def commande_traiter_depots(args, conf, conn):
+    """Ouvre, teste et range les jetons deposes depuis la page.
+
+    Sans depot en attente, ne charge meme pas la clef maitresse : collecte.sh
+    l'appelle a chaque passage, y compris sur une installation sans secrets
+    en base.
     """
-    if not hote:
-        return "pve_token"
-    propre = "".join(c if c.isalnum() else "_" for c in hote.lower())
-    return "pve_token_" + propre.strip("_")
+    import depot_scelle
+    try:
+        attente = depot_scelle.en_attente(conn)
+    except Exception as exc:     # table absente : schema pas encore rejoue
+        if "1146" in str(exc) or "doesn't exist" in str(exc):
+            return 0
+        raise
+    if not attente:
+        return 0
+    print("jetons deposes : {} en attente".format(len(attente)))
+    cle = secret_store.charger_cle_maitresse()
+    acceptes, refuses = depot_scelle.traiter(
+        conn, cle, lambda h, j: tester_pve(h, j, conf), nom_secret_pve)
+    print("jetons deposes : {} accepte(s), {} refuse(s)".format(acceptes, refuses))
+    if acceptes and not conf["pve"].get("jetons_deposes"):
+        erreur("pve.jetons_deposes n'est pas active dans infra.yml : la "
+               "collecte ne se servira pas de ces jetons.")
+    return 0
+
+
+def commande_compte_local(args, conf, conn):
+    """Cree un compte local, ou le reinitialise, et affiche une fois son mot
+    de passe genere. Le compte n'a aucun role avant de l'avoir change."""
+    import auth_locale
+
+    # Le mot de passe sort en clair sur la sortie : pas dans un fichier ni un
+    # journal par une redirection oubliee.
+    if not sys.stdout.isatty() and not args.force:
+        erreur("le mot de passe genere s'affiche sur le terminal : sortie "
+               "redirigee refusee (--force pour passer outre).")
+        return 2
+    try:
+        login = auth_locale.verifier_login(args.compte_local)
+        roles = auth_locale.lire_roles(args.roles)
+        mdp = auth_locale.creer_ou_reinitialiser(conn, login, args.roles,
+                                                 utilisateur())
+    except inventory_db.VenteInvalide as exc:
+        erreur(str(exc))
+        return 1
+    print()
+    print("  compte local : {}".format(login))
+    print("  roles        : {}".format(", ".join(
+        r for r in auth_locale.ROLES if r in roles)))
+    print("  mot de passe : {}".format(mdp))
+    print()
+    print("  Affiche une seule fois. A changer a la premiere connexion :")
+    print("  d'ici la, le compte n'a aucun role. Ses sessions ouvertes sont")
+    print("  fermees.")
+    if (conf.get("web") or {}).get("auth") != "local":
+        print()
+        erreur("infra.yml n'a pas web.auth: local : le service ne propose pas "
+               "de connexion locale tant que ce n'est pas le cas.")
+    return 0
 
 
 def commande_pve(args, conf, conn, cle):
@@ -574,6 +651,16 @@ def main():
                    help="change le mot de passe de la base")
     g.add_argument("--rotate-key", action="store_true",
                    help="rechiffre tout sous une nouvelle clef")
+    g.add_argument("--init-depot", action="store_true",
+                   help="tire la clef de la boite de depot des jetons PVE")
+    g.add_argument("--traiter-depots", action="store_true",
+                   help="teste et range les jetons deposes depuis la page")
+    g.add_argument("--compte-local", metavar="LOGIN",
+                   help="cree ou reinitialise un compte local (mot de passe "
+                        "genere, a changer a la premiere connexion)")
+    ap.add_argument("--roles", default="admin,commercial",
+                    help="roles du compte local : lecture, commercial, admin "
+                         "(defaut : admin,commercial)")
 
     ap.add_argument("--appliquer", action="store_true",
                     help="execute la rotation (--rotate-key)")
@@ -620,8 +707,16 @@ def main():
             return commande_db(args, conf, conn)
         if args.rotate_key:
             return commande_rotate_key(args, conf, conn)
+        if args.compte_local:
+            # ni la clef maitresse ni secret_store : un compte local est un
+            # mot de passe hache, pas un secret chiffre
+            return commande_compte_local(args, conf, conn)
+        if args.traiter_depots:
+            return commande_traiter_depots(args, conf, conn)
 
         cle = secret_store.charger_cle_maitresse()
+        if args.init_depot:
+            return commande_init_depot(args, conf, conn, cle)
         if args.ovh:
             return commande_ovh(args, conf, conn, cle)
         return commande_pve(args, conf, conn, cle)

@@ -30,6 +30,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from fnmatch import fnmatch
@@ -122,16 +123,41 @@ class ResolveurSecrets:
         self.conf = conf
         self._conn = None
         self._cle = None
+        self._noms = None
+        # les hotes sont sondes en parallele : une connexion pymysql ne se
+        # partage pas entre fils sans verrou
+        self._verrou = threading.Lock()
 
     def __call__(self, valeur):
         if not isinstance(valeur, str) or not valeur.startswith("db:"):
             return secrets_infra.resoudre(valeur)
         import secret_store
-        if self._conn is None:
-            self._conn = inventory_db.connect(self.conf)
-        if self._cle is None:
-            self._cle = secret_store.charger_cle_maitresse()
-        return secret_store.lire(self._conn, valeur[3:], self._cle)
+        with self._verrou:
+            if self._conn is None:
+                self._conn = inventory_db.connect(self.conf)
+            if self._cle is None:
+                self._cle = secret_store.charger_cle_maitresse()
+            return secret_store.lire(self._conn, valeur[3:], self._cle)
+
+    def noms_en_base(self):
+        """Les secrets actifs de secret_store, par leur nom, lus une fois.
+
+        Sans la clef maitresse : on ne dechiffre rien, on regarde ce qui
+        existe. Une base injoignable rend un ensemble vide — la collecte se
+        rabat alors sur default_token — et le dit.
+        """
+        with self._verrou:
+            if self._noms is None:
+                import secret_store
+                try:
+                    if self._conn is None:
+                        self._conn = inventory_db.connect(self.conf)
+                    self._noms = {r["nom"] for r in secret_store.lister(self._conn)}
+                except Exception as exc:  # base absente, table absente
+                    log("jetons deposes illisibles, default_token seul : {}"
+                        .format(str(exc).splitlines()[0]))
+                    self._noms = set()
+            return self._noms
 
     def fermer(self):
         if self._conn is not None:
@@ -161,8 +187,16 @@ def resolve_secret(value, conf=None):
 
 
 def token_for(conf, host):
+    """Le jeton d'un hote : celui que infra.yml nomme, sinon celui qui a ete
+    depose pour lui (pve.jetons_deposes), sinon default_token."""
     tokens = conf["pve"].get("tokens") or {}
-    reference = tokens.get(host) or conf["pve"].get("default_token")
+    reference = tokens.get(host)
+    if not reference and conf["pve"].get("jetons_deposes"):
+        import secret_store
+        nom = secret_store.nom_secret_pve(host)
+        if nom in resolveur(conf).noms_en_base():
+            reference = "db:" + nom
+    reference = reference or conf["pve"].get("default_token")
     try:
         return resolve_secret(reference, conf)
     except RuntimeError as exc:

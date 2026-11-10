@@ -17,8 +17,12 @@ PYTHON="${INVENTAIRE_PYTHON:-python3}"
 # Deux sources possibles. systemd-creds depose les secrets dans un repertoire
 # qu'il est seul a pouvoir lire, et les scripts Python le consultent avant
 # l'environnement ; sinon on charge le fichier d'environnement.
+#
+# Le temoin est le mot de passe de la base, que toute collecte demande ; pas
+# pve_token, absent quand les jetons PVE sont en base (deposes depuis la
+# page, ou poses par inventory_cli.py --pve).
 SECRETS_PAR_SYSTEMD=0
-if [[ -n "${CREDENTIALS_DIRECTORY:-}" && -r "${CREDENTIALS_DIRECTORY}/pve_token" ]]; then
+if [[ -n "${CREDENTIALS_DIRECTORY:-}" && -r "${CREDENTIALS_DIRECTORY}/inventory_db_password" ]]; then
   SECRETS_PAR_SYSTEMD=1
   echo "secrets fournis par systemd-creds"
 elif [[ -r "$ENV_FILE" ]]; then
@@ -35,12 +39,14 @@ fi
 
 if [[ $SECRETS_PAR_SYSTEMD -eq 0 ]]; then
   for var in OVH_APPLICATION_KEY OVH_APPLICATION_SECRET OVH_CONSUMER_KEY \
-             PVE_TOKEN INVENTORY_DB_PASSWORD; do
+             INVENTORY_DB_PASSWORD; do
     if [[ -z "${!var:-}" ]]; then
       echo "variable manquante dans $ENV_FILE : $var" >&2
       exit 78
     fi
   done
+  # facultatif : les jetons peuvent etre en base, hote par hote
+  [[ -n "${PVE_TOKEN:-}" ]] || echo "PVE_TOKEN vide : seuls les jetons en base serviront"
 fi
 
 cd "$RACINE"
@@ -55,6 +61,13 @@ fi
 
 debut=$(date +%s)
 echo "--- collecte $(date --iso-8601=seconds) ---"
+
+# Jetons PVE deposes depuis la page : ouverts, testes et ranges avant la
+# collecte, pour qu'elle s'en serve des ce passage. Un echec ici ne bloque
+# pas la collecte : les hotes concernes restent simplement injoignables.
+if ! "$PYTHON" inventory_cli.py --traiter-depots; then
+  echo "depots de jetons non traites (la collecte continue)" >&2
+fi
 
 if ! "$PYTHON" infra_inventory.py --refresh --store-db > /dev/null; then
   code=$?

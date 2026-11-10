@@ -27,6 +27,10 @@ pve:
   pin_certs: true
   pin_dir: pinned
   default_token: "env:PVE_TOKEN"
+  # Jetons deposes depuis la page (boite scellee, voir depot_scelle.py) :
+  # une fois testes par la collecte, ils servent sans ligne a ajouter ici.
+  # Un hote nomme sous tokens: garde le sien.
+  jetons_deposes: true
   # token different pour un hote precis :
   tokens: {}
   #  ns1234.ip-1-2-3.eu: "env:PVE_TOKEN_CLUSTER2"
@@ -99,6 +103,13 @@ db:
 # deploy/inventaire-oidc.conf.example), les memes que dans le vhost Apache.
 # Une liste de comptes (lecteurs, commerciaux, admins) peut s'y ajouter.
 web:
+  # Qui authentifie :
+  #   local  comptes locaux, tant que l'OIDC n'est pas branche. Un compte se
+  #          cree par `inventory_cli.py --compte-local admin` ; vhost
+  #          deploy/apache-inventaire-local.conf. Les groupes ci-dessous ne
+  #          servent pas : le role est porte par le compte.
+  #   oidc   Authentik, par Apache (deploy/apache-inventaire.conf)
+  auth: local
   groupe_lecture: inventaire-lecture
   groupe_commercial: inventaire-commercial
   groupe_admin: inventaire-admin

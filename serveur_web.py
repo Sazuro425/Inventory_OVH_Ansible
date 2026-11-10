@@ -29,12 +29,31 @@ Routes :
     POST /api/commercial/resilier   passe un contrat a inactif
     POST /api/element     declare ou corrige un element (site, vhost...)
     POST /api/element/retirer       passe un element a inactif
+    POST /api/elements    declare plusieurs enfants d'un coup (4 sites a 40 EUR)
+    POST /api/role        pose ou leve le role d'un cluster, serveur ou VM
+    POST /api/roles       ajoute un role au catalogue (web, LAMP, proxy...)
+    GET  /api/recolte     etat de la recolte PVE par hyperviseur (admin)
+    POST /api/recolte/jeton  depose un jeton PVE, scelle (admin) : le service
+                          ne peut pas le relire, la collecte le teste et le
+                          range (voir depot_scelle.py)
     POST /api/surcharge   corrige une valeur collectee, ou leve la correction
     GET  /api/vues        les vues enregistrees (partagees, et les siennes)
     POST /api/vues        cree ou modifie une vue (lecteur ; auteur ou admin)
     POST /api/vues/retirer          retire une vue
 
-Toutes les routes autres que sante et inventaire exigent l'identite.
+En mode local (web.auth: local, tant que l'OIDC n'est pas branche) :
+    GET  /connexion       la page de connexion
+    POST /api/connexion   ouvre une session (cookie __Host-inventaire)
+    POST /api/deconnexion la ferme
+    POST /api/mot-de-passe change le mot de passe, obligatoire a la premiere
+                          connexion
+
+Toutes les routes autres que sante, inventaire et connexion exigent
+l'identite. Elle vient, selon web.auth :
+
+    oidc   (defaut) de l'en-tete X-Remote-User qu'Apache pose apres l'OIDC
+    local  de la session d'un compte local (auth_locale.py) ; les en-tetes
+           X-Remote-* sont alors ignores, meme s'ils arrivent
 Toutes les ecritures exigent le role commercial, un corps JSON, et une
 requete qui vienne de la page elle-meme (voir meme_origine()).
 
@@ -42,7 +61,8 @@ Trois roles, declares dans infra.yml sous web:, chacun par un groupe OIDC
 qu'Apache transmet dans X-Remote-Groups, ou par une liste de comptes :
 
     lecture      groupe_lecture / lecteurs       page, rentabilite, export
-    commercial   groupe_commercial / commerciaux ventes, elements, corrections
+    commercial   groupe_commercial / commerciaux ventes, elements, corrections,
+                                                 roles
     admin        groupe_admin / admins           jetons pour le client Ansible
 
 Commercial et admin emportent la lecture. Sans lecture declaree, toute
@@ -60,6 +80,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+from http.cookies import CookieError, SimpleCookie
 import os
 import re
 import secrets
@@ -70,11 +91,15 @@ from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import auth_locale  # noqa: E402
+import depot_scelle  # noqa: E402
 import infra_inventory as orch  # noqa: E402
 import inventory_db  # noqa: E402
 import rentabilite as calcul  # noqa: E402
 
 DUREE_JETON_MIN = 10
+MODES_AUTH = ("oidc", "local")
+PAGE_CONNEXION = Path(__file__).resolve().parent / "assets" / "connexion.html"
 
 # En-tetes poses sur toutes les reponses. L'API ne rend que du JSON et du
 # CSV : rien a encadrer, rien a interpreter autrement que ce qui est annonce.
@@ -199,13 +224,58 @@ class Handler(BaseHTTPRequestHandler):
         hote = (self.headers.get("Host") or "").lower()
         return urlparse(origine).netloc.lower() == hote
 
+    def mode_local(self):
+        return (self.conf.get("web") or {}).get("auth") == "local"
+
+    def jeton_session(self):
+        try:
+            biscuit = SimpleCookie(self.headers.get("Cookie") or "")
+        except CookieError:
+            return None
+        m = biscuit.get(auth_locale.COOKIE)
+        return m.value if m else None
+
+    def compte_local(self):
+        """Le compte de la session locale, ou None. Lu une fois par requete."""
+        jeton = self.jeton_session()
+        cache = getattr(self, "_session", None)
+        if cache is not None and cache[0] == jeton:
+            return cache[1]
+        compte = None
+        if jeton:
+            try:
+                conn = self.base()
+                try:
+                    compte = auth_locale.session(conn, jeton)
+                finally:
+                    conn.close()
+            except inventory_db.DbError as exc:
+                self.log_message("session illisible : %s", pour_journal(exc))
+        self._session = (jeton, compte)
+        return compte
+
+    def origine_client(self):
+        """L'adresse du poste, pour le journal : Apache l'ajoute en dernier
+        a X-Forwarded-For. Jamais un critere de securite."""
+        xff = (self.headers.get("X-Forwarded-For") or "").split(",")[-1].strip()
+        return (xff or self.client_address[0])[:45]
+
     def identite(self):
-        """Identite OIDC transmise par Apache, ou compte de developpement."""
+        """L'identite de la requete.
+
+        En mode local, la session et elle seule : un X-Remote-User venu
+        d'ailleurs ne vaut rien. Sinon, l'en-tete qu'Apache pose apres
+        l'OIDC, ou le compte de developpement.
+        """
+        if self.mode_local():
+            c = self.compte_local()
+            return c["login"] if c else None
         return self.headers.get("X-Remote-User") or self.dev_user
 
     def en_dev(self):
         """Requete servie sans Apache, sous l'identite de --dev-user."""
-        return bool(self.dev_user) and not self.headers.get("X-Remote-User")
+        return (bool(self.dev_user) and not self.mode_local()
+                and not self.headers.get("X-Remote-User"))
 
     def groupes(self):
         """Groupes OIDC, tels qu'Apache les transmet (claim "groups") :
@@ -215,6 +285,8 @@ class Handler(BaseHTTPRequestHandler):
         mod_auth_openidc joint les valeurs d'une claim tableau par des
         virgules. Un en-tete absent ou non resolu ("(null)") ne donne rien.
         """
+        if self.mode_local():
+            return []
         if self.en_dev():
             return list(self.dev_groupes or [])
         brut = self.headers.get("X-Remote-Groups") or ""
@@ -231,6 +303,9 @@ class Handler(BaseHTTPRequestHandler):
         utilisateur = self.identite()
         if not utilisateur:
             return set()
+        if self.mode_local():
+            # aucun role tant que le mot de passe genere n'est pas change
+            return set(self.compte_local()["roles"])
         if self.en_dev() and self.dev_groupes is None:
             return {"lecture", "commercial", "admin"}
 
@@ -282,7 +357,9 @@ class Handler(BaseHTTPRequestHandler):
         if "commercial" in self.roles():
             return True, None
         web = self.conf.get("web") or {}
-        if not (web.get("commerciaux") or web.get("groupe_commercial")):
+        if self.mode_local():
+            pass                # le role est porte par le compte lui-meme
+        elif not (web.get("commerciaux") or web.get("groupe_commercial")):
             return False, ("aucun commercial declare : renseigne "
                            "web.commerciaux ou web.groupe_commercial "
                            "dans infra.yml")
@@ -292,7 +369,7 @@ class Handler(BaseHTTPRequestHandler):
     def peut_emettre(self):
         """Un jeton Ansible : admin si un admin est declare, lecture sinon."""
         web = self.conf.get("web") or {}
-        if web.get("groupe_admin") or web.get("admins"):
+        if self.mode_local() or web.get("groupe_admin") or web.get("admins"):
             return "admin"
         return "lecture"
 
@@ -374,11 +451,25 @@ class Handler(BaseHTTPRequestHandler):
     # -- routes ------------------------------------------------------------
     def do_POST(self):
         route = self.path.split("?")[0].rstrip("/")
+        session = {
+            "/api/connexion": self.connexion,
+            "/api/deconnexion": self.deconnexion,
+            "/api/mot-de-passe": self.changer_mdp,
+        }
+        if route in session:
+            if not self.mode_local():
+                return self.repondre(404, {"erreur": "route inconnue"})
+            return session[route]()
+        if route == "/api/recolte/jeton":
+            return self.deposer_jeton()
         ecritures = {
             "/api/commercial": self.enregistrer_vente,
             "/api/commercial/resilier": self.resilier_vente,
             "/api/element": self.enregistrer_element,
             "/api/element/retirer": self.retirer_element,
+            "/api/elements": self.enregistrer_elements,
+            "/api/role": self.poser_role,
+            "/api/roles": self.creer_role,
             "/api/surcharge": self.poser_surcharge,
             "/api/vues": self.enregistrer_vue,
             "/api/vues/retirer": self.retirer_vue,
@@ -418,15 +509,131 @@ class Handler(BaseHTTPRequestHandler):
             return self.moi()
         if route == "/api/vues":
             return self.lister_vues()
+        if route == "/api/recolte":
+            return self.recolte()
         if route == "/api/commercial":
             return self.lister_ventes()
+        if route == "/connexion" and self.mode_local():
+            return self.servir_connexion()
         if route in ("", "/index.html") and self.page:
             return self.servir_page()
         return self.repondre(404, {"erreur": "route inconnue"})
 
+    def rediriger(self, cible):
+        self.send_response(303)
+        self.send_header("Location", cible)
+        self.send_header("Content-Length", "0")
+        for k, v in ENTETES_SURS.items():
+            self.send_header(k, v)
+        self.end_headers()
+
+    def servir_connexion(self):
+        try:
+            corps = PAGE_CONNEXION.read_bytes()
+        except OSError as exc:
+            self.log_message("page de connexion illisible : %s", pour_journal(exc))
+            return self.repondre(503, {"erreur": "page de connexion illisible"})
+        self.envoyer(200, corps, "text/html; charset=utf-8",
+                     {"Content-Security-Policy": CSP_PAGE,
+                      "X-Frame-Options": "DENY"})
+
+    # -- session locale ----------------------------------------------------
+    def poser_cookie(self, jeton, duree_s):
+        return {"Set-Cookie": "{}={}; Path=/; Secure; HttpOnly; "
+                              "SameSite=Strict; Max-Age={}".format(
+                                  auth_locale.COOKIE, jeton, duree_s)}
+
+    def avec_base(self, fn):
+        """Comme lire(), mais pour les routes de session : un Refus devient
+        sa reponse HTTP. Renvoie (resultat, None) ou (None, True)."""
+        try:
+            conn = self.base()
+        except inventory_db.DbError as exc:
+            self.log_message("base : %s", pour_journal(exc))
+            self.repondre(503, {"erreur": "base indisponible"})
+            return None, True
+        try:
+            return fn(conn), None
+        except auth_locale.Refus as exc:
+            self.repondre(exc.code, {"erreur": str(exc)})
+        except inventory_db.DbError as exc:
+            self.log_message("base : %s", pour_journal(exc))
+            self.repondre(503, {"erreur": "base indisponible"})
+        finally:
+            conn.close()
+        return None, True
+
+    def connexion(self):
+        if not self.meme_origine():
+            return self.repondre(403, {"erreur": "requete d'une autre origine"})
+        charge, erreur = self.corps_json(limite=2048)
+        if erreur:
+            return self.repondre(400, {"erreur": erreur})
+        login = charge.get("login") if isinstance(charge.get("login"), str) else ""
+        mdp = (charge.get("mot_de_passe")
+               if isinstance(charge.get("mot_de_passe"), str) else "")
+        origine = self.origine_client()
+        res, echec = self.avec_base(
+            lambda c: auth_locale.connecter(c, login, mdp, origine))
+        if echec:
+            self.log_message("connexion refusee : %s depuis %s",
+                             pour_journal(login), origine)
+            return
+        jeton, compte = res
+        self.log_message("connexion : %s depuis %s", pour_journal(compte["login"]),
+                         origine)
+        self.envoyer(200, json.dumps({
+            "connecte": True, "utilisateur": compte["login"],
+            "doit_changer": compte["doit_changer"]}).encode("utf-8"),
+            "application/json; charset=utf-8",
+            self.poser_cookie(jeton, int(auth_locale.DUREE_MAX.total_seconds())))
+
+    def deconnexion(self):
+        if not self.meme_origine():
+            return self.repondre(403, {"erreur": "requete d'une autre origine"})
+        compte, jeton = self.compte_local(), self.jeton_session()
+        if compte:
+            _, echec = self.avec_base(
+                lambda c: auth_locale.deconnecter(c, jeton, compte["login"]))
+            if echec:
+                return
+            self.log_message("deconnexion : %s", pour_journal(compte["login"]))
+        self.envoyer(200, b'{"deconnecte": true}', "application/json; charset=utf-8",
+                     self.poser_cookie("", 0))
+
+    def changer_mdp(self):
+        if not self.meme_origine():
+            return self.repondre(403, {"erreur": "requete d'une autre origine"})
+        compte = self.compte_local()
+        if not compte:
+            return self.repondre(401, {"erreur": "session absente ou expiree"})
+        charge, erreur = self.corps_json(limite=2048)
+        if erreur:
+            return self.repondre(400, {"erreur": erreur})
+        actuel, nouveau = charge.get("actuel"), charge.get("nouveau")
+        if not (isinstance(actuel, str) and isinstance(nouveau, str)):
+            return self.repondre(400, {"erreur": "actuel et nouveau attendus"})
+        jeton = self.jeton_session()
+        _, echec = self.avec_base(lambda c: auth_locale.changer_mdp(
+            c, compte["login"], actuel, nouveau, jeton))
+        if echec:
+            return
+        self.log_message("mot de passe change : %s", pour_journal(compte["login"]))
+        self.repondre(200, {"change": True})
+
     def servir_page(self):
-        """Sert le schema. En production c'est Apache qui le fait ; utile ici
-        pour que la page et l'API partagent la meme origine."""
+        """Sert le schema.
+
+        En OIDC, c'est Apache qui le sert, derriere l'authentification ; ici
+        c'est utile au developpement. En mode local, c'est le service, et
+        seulement a une session ouverte : la page cartographie
+        l'infrastructure et porte les prix.
+        """
+        if self.mode_local():
+            c = self.compte_local()
+            if not c or "lecture" not in c["roles"]:
+                return self.rediriger("/connexion" + (
+                    "?changer" if c and c["doit_changer"] else ""))
         try:
             corps = Path(self.page).read_bytes()
         except OSError as exc:
@@ -518,6 +725,49 @@ class Handler(BaseHTTPRequestHandler):
         self.repondre(201 if e["cree"] else 200,
                       {"enregistre": True, "element": e, "par": utilisateur})
 
+    def enregistrer_elements(self):
+        charge = self.ecriture_permise()
+        if charge is None:
+            return
+        utilisateur = self.identite()
+        lot, echec = self.lire(
+            lambda c: inventory_db.enregistrer_elements(c, charge, utilisateur))
+        if echec:
+            return
+        self.log_message("%d elements crees par %s sous %s %s : #%s a #%s",
+                         len(lot), pour_journal(utilisateur),
+                         lot[0]["parent_type"], pour_journal(lot[0]["parent_ref"]),
+                         lot[0]["id"], lot[-1]["id"])
+        self.repondre(201, {"enregistre": True, "elements": lot,
+                            "par": utilisateur})
+
+    def poser_role(self):
+        charge = self.ecriture_permise()
+        if charge is None:
+            return
+        utilisateur = self.identite()
+        a, echec = self.lire(
+            lambda c: inventory_db.poser_role(c, charge, utilisateur))
+        if echec:
+            return
+        self.log_message("role par %s : %s %s = %s", pour_journal(utilisateur),
+                         a["cible_type"], pour_journal(a["cible_ref"]),
+                         pour_journal(a["role"]))
+        self.repondre(200, {"enregistre": True, "role": a, "par": utilisateur})
+
+    def creer_role(self):
+        charge = self.ecriture_permise()
+        if charge is None:
+            return
+        utilisateur = self.identite()
+        r, echec = self.lire(
+            lambda c: inventory_db.creer_role(c, charge, utilisateur))
+        if echec:
+            return
+        self.log_message("role ajoute au catalogue par %s : %s",
+                         pour_journal(utilisateur), pour_journal(r["code"]))
+        self.repondre(201, {"enregistre": True, "role": r, "par": utilisateur})
+
     def retirer_element(self):
         charge = self.ecriture_permise()
         if charge is None:
@@ -549,6 +799,78 @@ class Handler(BaseHTTPRequestHandler):
                          pour_journal(s["valeur"]))
         self.repondre(200, {"enregistre": True, "surcharge": s,
                             "par": utilisateur})
+
+    # -- recolte PVE : etat par hyperviseur, depot de jetons -----------------
+    def recolte(self):
+        """Chaque dedie du dernier snapshot : sonde ou non, joignable ou non,
+        d'ou vient son jeton, et ou en est son dernier depot. Le service ne
+        sait pas si un jeton est en base — il n'a pas acces a secret_store —,
+        il sait ce qui a ete depose et ce que la collecte en a fait."""
+        if not self.exiger("admin"):
+            return
+
+        def lire(conn):
+            return (inventory_db.load_latest(conn),
+                    depot_scelle.etat_depots(conn),
+                    depot_scelle.cle_publique(conn) is not None)
+
+        res, echec = self.lire(lire)
+        if echec:
+            return
+        data, depots, pret = res
+        if data is None:
+            return self.repondre(503, {"erreur": "aucun snapshot en base"})
+        pve = self.conf.get("pve") or {}
+        nommes = set((pve.get("tokens") or {}).keys())
+        skip = set(pve.get("skip") or [])
+        sonde_de = {p["host"]: p for p in data.get("probes") or []}
+        hotes = []
+        for srv in data.get("servers") or []:
+            rev = srv.get("reverse") or ""
+            p = sonde_de.get(rev)
+            cluster = (p or {}).get("cluster") or ""
+            hotes.append({
+                "hote": rev, "ovh_name": srv.get("ovh_name"),
+                "ignore": rev in skip or srv.get("ovh_name") in skip,
+                "sonde": p is not None,
+                "joignable": bool(p) and not p.get("error"),
+                "erreur": (p or {}).get("error"),
+                "cluster": None if cluster.startswith("standalone:") else cluster or None,
+                "noeud": (p or {}).get("node"),
+                "jeton_infra_yml": rev in nommes,
+                "depot": depots.get(rev),
+            })
+        self.repondre(200, {"pret": pret, "jetons_deposes":
+                            bool(pve.get("jetons_deposes")),
+                            "snapshot": data.get("run_id"),
+                            "genere_le": data.get("generated_at"),
+                            "hotes": hotes})
+
+    def deposer_jeton(self):
+        if not self.meme_origine():
+            return self.repondre(403, {"erreur": "requete d'une autre origine"})
+        if not self.exiger("admin"):
+            return
+        charge, erreur = self.corps_json(limite=8192)
+        if erreur:
+            return self.repondre(400, {"erreur": erreur})
+        utilisateur = self.identite()
+
+        def faire(conn):
+            data = inventory_db.load_latest(conn)
+            connus = {x.get("reverse") for x in (data or {}).get("servers") or []}
+            hotes, jeton = depot_scelle.verifier_depot(charge, connus)
+            return depot_scelle.deposer(conn, hotes, jeton, utilisateur), hotes
+
+        res, echec = self.lire(faire)
+        if echec:
+            return
+        n, hotes = res
+        # jamais le jeton : ni ici, ni dans la reponse
+        self.log_message("jeton PVE depose par %s pour %d hote(s) : %s",
+                         pour_journal(utilisateur), n,
+                         pour_journal(", ".join(hotes)))
+        self.repondre(201, {"depose": n, "hotes": hotes})
 
     # -- lectures ------------------------------------------------------------
     def rentabilite(self):
@@ -642,6 +964,14 @@ class Handler(BaseHTTPRequestHandler):
         # La deconnexion passe par l'URL interne de mod_auth_openidc : elle
         # ferme la session Apache, puis celle d'Authentik (end_session).
         retour = web.get("oidc_redirect_uri") or "/oidc-callback"
+        if self.mode_local():
+            return self.repondre(200, {
+                "utilisateur": utilisateur, "groupes": [],
+                "roles": sorted(self.roles()),
+                "peut_emettre_jeton": "admin" in self.roles(),
+                "developpement": False, "deconnexion": None, "locale": True,
+                "doit_changer": self.compte_local()["doit_changer"],
+            })
         self.repondre(200, {
             "utilisateur": utilisateur,
             "groupes": self.groupes(),
@@ -738,6 +1068,15 @@ def main():
     args = ap.parse_args()
 
     conf = orch.load_config(args.config)
+    auth = (conf.get("web") or {}).get("auth", "oidc")
+    if auth not in MODES_AUTH:
+        print("web.auth inconnu : {} (attendu : {})".format(
+            auth, ", ".join(MODES_AUTH)), file=sys.stderr)
+        return 2
+    if auth == "local" and not args.page:
+        print("web.auth: local demande --page : c'est le service qui sert la "
+              "carte, derriere la session", file=sys.stderr)
+        return 2
     Handler.conf = conf
     Handler.dev_user = args.dev_user
     if args.dev_groupes is not None:
@@ -754,9 +1093,13 @@ def main():
     serveur = ThreadingHTTPServer((args.host, args.port), Handler)
     print("inventaire : http://{}:{}/api/sante".format(args.host, args.port),
           file=sys.stderr)
-    if args.dev_user:
+    if args.dev_user and auth == "local":
+        print("--dev-user ignore : en mode local, seule une session ouvre "
+              "le service", file=sys.stderr)
+    elif args.dev_user:
         print("MODE DEVELOPPEMENT : toute requete est vue comme "
               "'{}'".format(args.dev_user), file=sys.stderr)
+    print("authentification : {}".format(auth), file=sys.stderr)
     try:
         serveur.serve_forever()
     except KeyboardInterrupt:

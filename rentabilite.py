@@ -157,15 +157,21 @@ def _somme_capacites(caps):
 # Le calcul
 # ---------------------------------------------------------------------------
 
-def calculer(data, ventes=(), elements=(), surcharges=()):
+def calculer(data, ventes=(), elements=(), surcharges=(), roles=(),
+             catalogue=()):
     """Construit l'arbre de rentabilite.
 
     data       : le snapshot (servers, probes, guests, costs)
     ventes     : contrats actifs (v_vente_active)
     elements   : elements declares actifs (table element)
     surcharges : corrections dont la valeur n'est pas nulle (table surcharge)
+    roles      : roles poses sur les clusters, serveurs et VM (role_carte)
+    catalogue  : les roles connus, code et libelle (table role)
     """
     ventes, elements, surcharges = list(ventes), list(elements), list(surcharges)
+    role_de = {(r["cible_type"], r["cible_ref"]): r["role"]
+               for r in roles if r.get("role")}
+    libelle_role = {r["code"]: r["libelle"] for r in catalogue}
     serveurs = data.get("servers") or []
     probes = data.get("probes") or []
     invites = data.get("guests") or []
@@ -333,7 +339,7 @@ def calculer(data, ventes=(), elements=(), surcharges=()):
         if e.get("devise"):
             devises.add(e["devise"])
         c["infos"] = {k: e.get(k) for k in (
-            "genre", "contrat", "client", "note", "periode", "parent_type",
+            "contrat", "client", "note", "periode", "parent_type",
             "parent_ref")}
         c["infos"]["prix_vente"] = _num(e.get("prix_vente"))
         c["infos"]["prix_achat"] = _num(e.get("prix_achat"))
@@ -373,6 +379,25 @@ def calculer(data, ventes=(), elements=(), surcharges=()):
                                   t, ref)})
             continue
         parent["enfants"].append(c)
+
+    # -- roles ----------------------------------------------------------------
+    # Un element porte le sien ; les autres cartes le recoivent de role_carte.
+    # Deux VM homonymes : le role va a celle qui porte les contrats.
+    def attribuer(c):
+        if c["type"] == "element":
+            code = c["_e"].get("role")
+        elif c["type"] == "vm" and vm_pour(c["cle"]) is not c:
+            code = None
+        else:
+            code = role_de.get((c["type"], c["cle"]))
+        c["infos"]["role"] = code or None
+        # un role retire du catalogue reste lisible par son code
+        c["infos"]["role_libelle"] = libelle_role.get(code, code) if code else None
+        for e in c["enfants"]:
+            attribuer(e)
+
+    for cl in clusters.values():
+        attribuer(cl)
 
     # -- capacite et cumuls ---------------------------------------------------
     for c in carte_srv.values():
@@ -461,7 +486,7 @@ def calculer(data, ventes=(), elements=(), surcharges=()):
 
 COLONNES = [
     "Niveau", "Type", "Nom", "Chemin", "Cluster", "Serveur", "VM",
-    "Genre", "Contrat", "Client",
+    "Rôle", "Contrat", "Client",
     "PA propre (€/mois)", "PV propre (€/mois)",
     "PA cumulé (€/mois)", "CA cumulé (€/mois)", "ROI (€/mois)",
     "PA collecté (€/mois)", "Correction", "Motif de la correction",
@@ -529,7 +554,7 @@ def lignes(resultat):
             "Chemin": texte_sur(" > ".join(chemin)),
             "Cluster": texte_sur(cluster), "Serveur": texte_sur(serveur),
             "VM": texte_sur(vm),
-            "Genre": texte_sur(c["infos"].get("genre")),
+            "Rôle": texte_sur(c["infos"].get("role_libelle")),
             "Contrat": texte_sur(c["infos"].get("contrat") or ", ".join(
                 x["contrat"] for x in c["infos"].get("contrats") or [])),
             "Client": texte_sur(c["infos"].get("client") or ", ".join(sorted({
@@ -568,8 +593,8 @@ def lignes(resultat):
 
     for o in resultat["orphelins"]:
         out.append({k: "" for k in COLONNES} | {
-            "Niveau": "0", "Type": "Hors parc",
-            "Nom": texte_sur(o["nom"]), "Genre": texte_sur(o["genre"]),
+            "Niveau": "0", "Type": "Hors parc (" + o["genre"] + ")",
+            "Nom": texte_sur(o["nom"]),
             "Contrat": texte_sur(o.get("contrat")),
             "Client": texte_sur(o.get("client")),
             "PV propre (€/mois)": nombre(o["pv"]),

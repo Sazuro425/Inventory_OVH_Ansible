@@ -263,6 +263,43 @@ d'echec a ete eprouve.
 
 ---
 
+### Deposer les jetons depuis la page (boite scellee)
+
+Plutot que trente `inventory --pve` en SSH, un admin depose les jetons depuis
+la page : bouton **Recolte**, ou fiche d'un hyperviseur dans le schema. Le
+service web ne peut pas relire ce qu'il recoit :
+
+- il scelle le jeton des reception avec une clef **publique** (X25519, AES-GCM,
+  l'hote lie au chiffre) et l'enregistre « en attente » dans `depot_jeton` ;
+- au passage suivant, `collecte.sh` lance `inventory_cli.py --traiter-depots` :
+  la collecte ouvre le depot avec la clef privee (elle-meme dans
+  `secret_store`, chiffree par la clef maitresse), teste le jeton sur
+  l'hyperviseur, puis le range dans `secret_store` ou le refuse avec son
+  motif, que la page affiche ;
+- un jeton accepte sert directement, sans ligne dans `infra.yml`
+  (`pve.jetons_deposes: true`). Un hote nomme sous `pve.tokens` garde le sien.
+
+Une fois, apres l'etape 5 :
+
+```bash
+sudo systemd-run --quiet --pty --wait --collect -p User=inventaire \
+    -p WorkingDirectory=/opt/inventaire-infra \
+    -p LoadCredentialEncrypted=master_key:/etc/inventaire-infra/creds/master_key.cred \
+    -p LoadCredentialEncrypted=inventory_db_password:/etc/inventaire-infra/creds/inventory_db_password.cred \
+    python3 inventory_cli.py --init-depot
+```
+
+Le compte de recolte se cree sur **un noeud par cluster** (la page rappelle
+les trois commandes `pveum`) ; au depot, les autres noeuds du meme cluster
+sont coches d'office. Pour ne pas attendre le timer :
+`sudo systemctl start inventaire-collecte.service`.
+
+Ce qu'un service web compromis obtiendrait : les jetons deposes **apres** la
+compromission, qu'il voit passer le temps de les sceller. Ni les depots
+anterieurs, ni un seul jeton deja en service.
+
+---
+
 ## 8. Activer la collecte et le service web
 
 ```bash
@@ -280,10 +317,81 @@ C'est aussi le test du compte `inventory_web` : si la reponse est
 
 ---
 
-## 9. Apache et OIDC
+## 9. Apache et l'authentification
+
+Deux modes, choisis par `web.auth` dans `infra.yml`, jamais les deux a la
+fois :
+
+| `web.auth` | Qui authentifie | Vhost |
+|---|---|---|
+| `local` | le service, comptes locaux en base | `deploy/apache-inventaire-local.conf` |
+| `oidc` | Apache, par Authentik | `deploy/apache-inventaire.conf` |
+
+On commence en `local` tant que le client OIDC n'existe pas, et on bascule
+ensuite (9b) : les comptes locaux restent en base, ils ne servent plus.
+
+### 9a. Comptes locaux, en attendant l'OIDC
+
+Apache termine le TLS et passe tout au service, page comprise. Le service
+exige une session, sert la carte a une session ouverte seulement, et
+renvoie le reste vers `/connexion`. Les en-tetes `X-Remote-*` sont ignores
+dans ce mode, meme si un client les envoie.
+
+```bash
+sudo a2enmod ssl headers proxy proxy_http
+sudo cp deploy/apache-inventaire-local.conf /etc/apache2/sites-available/inventaire.conf
+# ajuster ServerName et le certificat
+sudo a2ensite inventaire && sudo apache2ctl configtest
+sudo systemctl reload apache2
+```
+
+Le compte admin, genere sous le compte de collecte (le compte web ne peut
+pas creer de compte, il n'a pas INSERT sur `compte_local`) :
+
+```bash
+cd /opt/inventaire-infra
+sudo systemd-run --quiet --pty --wait --collect -p User=inventaire \
+    -p WorkingDirectory=/opt/inventaire-infra \
+    -p LoadCredentialEncrypted=inventory_db_password:/etc/inventaire-infra/creds/inventory_db_password.cred \
+    python3 inventory_cli.py --compte-local admin
+```
+
+Le mot de passe est tire au hasard et **affiche une seule fois** ; la
+commande refuse une sortie redirigee vers un fichier. A la premiere
+connexion, la page impose d'en choisir un autre (12 caracteres au moins,
+sans l'identifiant) ; d'ici la, le compte n'a aucun role, l'API lui repond
+403. Relancer la meme commande reinitialise le compte : nouveau mot de
+passe, sessions fermees, compte debloque. D'autres comptes se creent de la
+meme facon, avec `--roles lecture` ou `--roles commercial`.
+
+Ce que le mode local garantit :
+
+- mot de passe stocke en scrypt sale, jamais en clair ni reversible ;
+- cinq echecs de suite bloquent le compte quinze minutes ;
+- session dans un cookie `__Host-` Secure, HttpOnly, SameSite=Strict ; la
+  base n'en garde que l'empreinte ;
+- fin de session apres une heure d'inactivite, huit heures au plus, a la
+  deconnexion, ou quand le mot de passe change ailleurs ;
+- connexions, echecs, deconnexions et changements au journal des saisies.
+
+Ce qu'il ne fait pas : de MFA, ni de limite par adresse. Sans OIDC, la
+restriction reseau du vhost (`Require ip`, commentee) est la protection la
+moins chere a ajouter.
+
+**Verifier :**
+
+```bash
+# sans session : la carte renvoie vers /connexion, l'API refuse
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' https://inventaire.exemple.lan/
+curl -s -o /dev/null -w '%{http_code}\n' https://inventaire.exemple.lan/api/rentabilite   # 401
+# un en-tete d'identite forge ne vaut rien en mode local
+curl -s -H 'X-Remote-User: admin' https://inventaire.exemple.lan/api/moi                 # 401
+```
+
+### 9b. OIDC
 
 Un seul mode d'authentification, OIDC par Authentik, pour la page comme pour
-l'API. Le detail cote Authentik (groupes, scope mapping, provider) est en tete
+l'API. Dans `infra.yml`, `web.auth: oidc` ; puis redemarrer le service. Le detail cote Authentik (groupes, scope mapping, provider) est en tete
 de `deploy/inventaire-oidc.conf.example` : le suivre avant de remplir le
 fichier.
 
@@ -358,7 +466,8 @@ capacite allouee contre la capacite physique. Le calcul est dans
 
 1. Le droit `GET /services*` sur la clef OVH. Sans lui, la collecte releve le
    materiel mais aucun cout : chaque serveur est signale « sans tarif ». Un
-   cout peut aussi etre saisi a la main (bouton *Corriger*), avec un motif.
+   cout peut aussi etre saisi a la main (bouton *Modifier*, ou *Prix et
+   role* sur la fiche de l'hyperviseur), avec un motif.
 2. Le schema a jour, puis les droits du compte web, **dans cet ordre** :
    un `GRANT` sur une table qui n'existe pas encore echoue.
 
@@ -368,12 +477,15 @@ capacite allouee contre la capacite physique. Le calcul est dans
    ```
 
    La derniere requete de `setup_db_web.sql` doit lister exactement :
-   `client_token`, `commercial`, `element`, `surcharge`, `vue_rentabilite`
-   en INSERT,UPDATE, et `journal_saisie` en INSERT seul. Le compte web ne peut ni corriger ni
+   `client_token`, `commercial`, `element`, `role`, `role_carte`,
+   `session_locale`, `surcharge`, `vue_rentabilite` en INSERT,UPDATE,
+   `compte_local` en UPDATE seul, et `journal_saisie` en INSERT seul. Le compte web ne peut ni corriger ni
    effacer le journal.
-3. Le role commercial, dans `infra.yml` : `web.groupe_commercial` (le groupe
-   Authentik) ou `web.commerciaux` (une liste de comptes). Sans l'un des deux,
-   aucune saisie n'est acceptee. Voir l'etape 9 pour les trois roles.
+3. Le role commercial. En comptes locaux, il est porte par le compte
+   (`--roles commercial`, l'admin genere l'a). En OIDC, dans `infra.yml` :
+   `web.groupe_commercial` (le groupe Authentik) ou `web.commerciaux` (une
+   liste de comptes) ; sans l'un des deux, aucune saisie n'est acceptee.
+   Voir l'etape 9 pour les roles.
 4. Le bloc `LocationMatch` de `deploy/apache-inventaire.conf` : c'est le seul
    endroit ou `X-Remote-User` et `X-Remote-Groups` sont poses, apres l'OIDC.
 
@@ -388,9 +500,34 @@ curl -s -H 'X-Remote-Groups: inventaire-commercial' -H 'X-Remote-User: evan' \
 # depuis la VM seulement : rend l'arbre
 ```
 
+**Saisir depuis la topologie.** Un clic sur un hyperviseur ou une VM du
+schema ouvre sa fiche : son bilan, son role, ses contrats et ses enfants
+declares. Pour un commercial, trois boutons :
+
+- *Prix et role* : le role de la carte (serveur web, LAMP, proxy,
+  applicatif...), son cout et son prix de vente propres. Un prix corrige
+  demande un motif ; le role non.
+- *+ Enfants* : un ou plusieurs elements d'un coup, un nom par ligne, le
+  role et les prix en commun. Une VM LAMP qui heberge quatre sites a 40 EUR :
+  quatre lignes, 40, et le formulaire annonce avant l'envoi que la VM
+  rapportera 160 EUR de plus. Le lot entre en base en une transaction, tout
+  ou rien, une ligne de journal par element.
+- *Editer* sur un enfant : son nom, ses prix, son contrat, son client.
+
+Les memes saisies existent dans l'arbre de la vue Rentabilite.
+
+**Les roles** forment un catalogue (table `role`), pre-rempli par le schema :
+serveur web, LAMP, proxy, applicatif, base de donnees, messagerie, DNS,
+stockage, sauvegarde, supervision, site, vhost, domaine, licence, IP. Un
+commercial l'etend depuis n'importe quel choix de role (*Nouveau role...*) ;
+rien n'en est supprime. Un role se filtre, s'affiche en colonne dans le
+tableau et sort dans la colonne *Role* du CSV. Le filtre garde aussi les
+parents : filtrer « Serveur LAMP » au niveau serveur montre les hyperviseurs
+qui font tourner une VM LAMP.
+
 **Les vues.** La rentabilite s'ouvre sur la vue d'ensemble, en graphiques.
 Chaque graphique bascule en tableau et s'exporte en CSV, filtres compris.
-Les filtres (clusters, datacenters, clients, genres d'element, texte, a
+Les filtres (clusters, datacenters, clients, roles, texte, a
 perte, avec alerte) valent pour l'arbre, le tableau et les graphiques ; ils
 choisissent des cartes, ils ne recalculent pas leurs montants.
 
