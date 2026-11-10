@@ -860,8 +860,9 @@ class Handler(BaseHTTPRequestHandler):
         def faire(conn):
             data = inventory_db.load_latest(conn)
             connus = {x.get("reverse") for x in (data or {}).get("servers") or []}
-            hotes, jeton = depot_scelle.verifier_depot(charge, connus)
-            return depot_scelle.deposer(conn, hotes, jeton, utilisateur), hotes
+            hotes, jeton, echeance = depot_scelle.verifier_depot(charge, connus)
+            return depot_scelle.deposer(conn, hotes, jeton, utilisateur,
+                                        echeance), hotes
 
         res, echec = self.lire(faire)
         if echec:
@@ -960,6 +961,17 @@ class Handler(BaseHTTPRequestHandler):
             "developpement": self.en_dev(),
             "deconnexion": None if self.en_dev() else retour + "?logout=",
         })
+
+    @route("GET", "/api/journal/integrite", "admin")
+    def integrite_journal(self):
+        """La chaine du journal tient-elle ? Pour la page, et la supervision."""
+        res, echec = self.lire(inventory_db.verifier_journal)
+        if echec:
+            return
+        if not res["ok"]:
+            self.log_message("journal des saisies rompu a la ligne %s : %s",
+                             res["rupture"]["n"], res["rupture"]["motif"])
+        self.repondre(200, res)
 
     @route("GET", "/api/journal", "lecture")
     def journal(self):

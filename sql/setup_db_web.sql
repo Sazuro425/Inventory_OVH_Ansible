@@ -8,7 +8,7 @@
 --
 -- Ce fichier ne touche que 'inventory_web' : il le cree, ou change son mot
 -- de passe. Remplace le mot de passe avant de le lancer. Ses droits sont
--- dans sql/droits_web.sql, a lancer juste apres, puis apres chaque mise a
+-- dans sql/droits.sql, a lancer juste apres, puis apres chaque mise a
 -- jour du schema.
 --
 -- Pourquoi un compte a part : le service web est joignable depuis Apache,
@@ -23,4 +23,4 @@ ALTER USER 'inventory_web'@'localhost'
 
 FLUSH PRIVILEGES;
 
--- Suite : mariadb < sql/droits_web.sql
+-- Suite : mariadb < sql/droits.sql

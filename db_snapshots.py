@@ -192,24 +192,34 @@ def purger_jetons_clients(conn, delai=dt.timedelta(days=1)):
 
     Fait par la collecte : le service web, qui les emet, n'a pas DELETE.
     """
-    with conn.cursor() as cur:
-        cur.execute("DELETE FROM client_token WHERE expire_le < %s",
-                    (dt.datetime.now() - delai,))
-        n = cur.rowcount
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM client_token WHERE expire_le < %s",
+                        (dt.datetime.now() - delai,))
+            n = cur.rowcount
+    except pymysql.Error as exc:
+        conn.rollback()
+        raise _traduit(exc, "la purge des jetons clients") from exc
     conn.commit()
     return n
 
 
 def purge(conn, keep):
     """Ne garde que les N derniers runs (les snapshots suivent en cascade)."""
-    with conn.cursor() as cur:
-        cur.execute("SELECT id FROM collect_run ORDER BY id DESC LIMIT %s", (keep,))
-        gardes = [r["id"] for r in cur.fetchall()]
-        if not gardes:
-            return 0
-        trous = ",".join(["%s"] * len(gardes))
-        cur.execute("DELETE FROM collect_run WHERE id NOT IN (" + trous + ")", gardes)
-        supprimes = cur.rowcount
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM collect_run ORDER BY id DESC LIMIT %s",
+                        (keep,))
+            gardes = [r["id"] for r in cur.fetchall()]
+            if not gardes:
+                return 0
+            trous = ",".join(["%s"] * len(gardes))
+            cur.execute("DELETE FROM collect_run WHERE id NOT IN (" + trous + ")",
+                        gardes)
+            supprimes = cur.rowcount
+    except pymysql.Error as exc:
+        conn.rollback()
+        raise _traduit(exc, "la purge des anciens runs") from exc
     conn.commit()
     return supprimes
 

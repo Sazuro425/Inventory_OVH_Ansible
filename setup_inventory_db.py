@@ -196,9 +196,12 @@ def setup_par_client(args, grant_hosts):
         morceaux.append("CREATE USER IF NOT EXISTS {} {};".format(cible, auth))
         morceaux.append("ALTER USER {} {};".format(cible, auth))
         morceaux.append(
-            "GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, CREATE VIEW, DROP, "
+            "GRANT SELECT, INSERT, UPDATE, CREATE, CREATE VIEW, DROP, "
             "INDEX, REFERENCES, ALTER ON `{}`.* TO {};".format(
                 args.db_name, cible))
+        # plus de DELETE sur toute la base (voir sql/droits.sql)
+        morceaux.append("GRANT DELETE ON `{0}`.* TO {1}; REVOKE DELETE ON "
+                        "`{0}`.* FROM {1};".format(args.db_name, cible))
     morceaux.append("FLUSH PRIVILEGES;")
 
     if not args.no_schema:
@@ -325,9 +328,13 @@ def main():
                     args.db_user, origine,
                     "mot de passe mis a jour" if existe else "cree"))
             cur.execute(
-                "GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, CREATE VIEW, DROP, "
+                "GRANT SELECT, INSERT, UPDATE, CREATE, CREATE VIEW, DROP, "
                 "INDEX, REFERENCES, ALTER ON `{}`.* TO %s@%s".format(
                     args.db_name), (args.db_user, origine))
+            # plus de DELETE sur toute la base (voir sql/droits.sql)
+            for ordre in ("GRANT DELETE ON `{}`.* TO %s@%s",
+                          "REVOKE DELETE ON `{}`.* FROM %s@%s"):
+                cur.execute(ordre.format(args.db_name), (args.db_user, origine))
         cur.execute("FLUSH PRIVILEGES")
 
     deja_la = any(o in avant["comptes"] for o in grant_hosts)

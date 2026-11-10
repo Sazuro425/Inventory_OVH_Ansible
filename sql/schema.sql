@@ -387,6 +387,8 @@ CREATE TABLE IF NOT EXISTS depot_jeton (
   scelle       VARBINARY(600) NOT NULL,
   depose_le    DATETIME      NOT NULL,
   depose_par   VARCHAR(190)  NOT NULL,
+  -- echeance declaree du jeton (migration 0004), NULL si inconnue
+  expire_le    DATE          NULL,
   etat         ENUM('en_attente','accepte','refuse','remplace')
                              NOT NULL DEFAULT 'en_attente',
   traite_le    DATETIME      NULL,
@@ -426,15 +428,30 @@ CREATE TABLE IF NOT EXISTS vue_rentabilite (
 
 CREATE TABLE IF NOT EXISTS journal_saisie (
   id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+  -- la chaine (migration 0003) : rang, empreinte precedente, la sienne
+  n            BIGINT        NULL,
+  precedente   CHAR(64)      NULL,
+  empreinte    CHAR(64)      NULL,
   le           DATETIME      NOT NULL,
   par          VARCHAR(190)  NOT NULL,
   action       VARCHAR(40)   NOT NULL,
   cible        VARCHAR(300)  NOT NULL,
   avant        TEXT          NULL,
   apres        TEXT          NULL,
+  UNIQUE KEY uq_journal_n (n),
   INDEX idx_journal_le (le),
   INDEX idx_journal_cible (cible(190))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Le dernier maillon de la chaine du journal, verrouille a chaque ecriture.
+CREATE TABLE IF NOT EXISTS journal_tete (
+  id         TINYINT   NOT NULL PRIMARY KEY,
+  n          BIGINT    NOT NULL,
+  empreinte  CHAR(64)  NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO journal_tete (id, n, empreinte)
+  VALUES (1, 0, REPEAT('0', 64));
 
 -- ---------------------------------------------------------------------------
 -- Version du schema.

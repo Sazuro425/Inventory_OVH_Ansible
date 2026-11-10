@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 import decimal
+import hashlib
 import json
 import os
 import re
@@ -286,9 +287,8 @@ def _traduit(exc, quoi):
             "ou lance : python setup_inventory_db.py --db-password '<mdp>'")
     if code in (1044, 1142):  # droits insuffisants
         return DbError(
-            "droits insuffisants pour {} : le compte de collecte a besoin de "
-            "SELECT, INSERT, UPDATE, DELETE sur la base ; le compte web, des "
-            "seuls droits poses par sql/droits_web.sql — a rejouer apres "
+            "droits insuffisants pour {} : les droits par table des deux "
+            "comptes sont dans sql/droits.sql, a rejouer en root apres "
             "chaque mise a jour du schema.".format(quoi))
     return DbError("{} impossible : {}".format(quoi, exc))
 
@@ -362,16 +362,89 @@ def _js(ligne):
         ensure_ascii=False, sort_keys=True)
 
 
+ORIGINE_CHAINE = "0" * 64
+
+
+def empreinte_journal(n, precedente, le, par, action, cible, avant, apres):
+    """L'empreinte d'une ligne du journal : son contenu et celle d'avant."""
+    contenu = json.dumps([n, precedente, le.isoformat(sep=" "), par, action,
+                          cible, avant, apres],
+                         ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(contenu.encode("utf-8")).hexdigest()
+
+
 def journaliser(cur, par, action, cible, avant=None, apres=None):
     """Trace une saisie, dans la transaction de la saisie elle-meme.
 
     Meme curseur, meme commit : une saisie sans trace, ou une trace sans
-    saisie, sont impossibles.
+    saisie, sont impossibles. La ligne s'accroche a la chaine (migration
+    0003) : la tete est verrouillee le temps de l'ecriture, si bien que deux
+    saisies simultanees se suivent.
     """
+    # ce que la base gardera, a la seconde et a la longueur des colonnes :
+    # l'empreinte doit porter sur ce qui sera relu
+    le = dt.datetime.now().replace(microsecond=0)
+    ligne = (str(par)[:190], str(action)[:40], str(cible)[:300],
+             _js(avant), _js(apres))
+    cur.execute("SELECT n, empreinte FROM journal_tete WHERE id = 1 FOR UPDATE")
+    tete = cur.fetchone()
+    if tete is None:
+        raise DbError("journal_tete vide : rejoue sql/schema.sql")
+    n = tete["n"] + 1
+    emp = empreinte_journal(n, tete["empreinte"], le, *ligne)
     cur.execute(
-        "INSERT INTO journal_saisie (le, par, action, cible, avant, apres) "
-        "VALUES (%s, %s, %s, %s, %s, %s)",
-        (dt.datetime.now(), par, action, cible[:300], _js(avant), _js(apres)))
+        "INSERT INTO journal_saisie (n, precedente, empreinte, le, par, action,"
+        " cible, avant, apres) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        (n, tete["empreinte"], emp, le) + ligne)
+    cur.execute("UPDATE journal_tete SET n = %s, empreinte = %s WHERE id = 1",
+                (n, emp))
+
+
+def tete_journal(conn):
+    """(n, empreinte) du dernier maillon : l'ancre que la collecte recopie
+    hors de la base, pour qu'une chaine reecrite en entier se voie aussi."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT n, empreinte FROM journal_tete WHERE id = 1")
+        r = cur.fetchone()
+    return (r["n"], r["empreinte"]) if r else (0, ORIGINE_CHAINE)
+
+
+def verifier_journal(conn):
+    """Parcourt la chaine. Rend {ok, chainees, hors_chaine, rupture, tete}.
+
+    rupture : None, ou {n, motif} au premier maillon qui ne tient pas —
+    ligne modifiee, effacee, inseree, ou tete qui ne colle pas a la fin.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) AS c FROM journal_saisie WHERE n IS NULL")
+        hors = cur.fetchone()["c"]
+        cur.execute("SELECT n, precedente, empreinte, le, par, action, cible, "
+                    "avant, apres FROM journal_saisie WHERE n IS NOT NULL "
+                    "ORDER BY n")
+        lignes = cur.fetchall()
+        cur.execute("SELECT n, empreinte FROM journal_tete WHERE id = 1")
+        tete = cur.fetchone()
+
+    def rompu(n, motif):
+        return {"ok": False, "chainees": len(lignes), "hors_chaine": hors,
+                "rupture": {"n": n, "motif": motif}, "tete": tete and tete["n"]}
+
+    attendu_n, attendu_prec = 1, ORIGINE_CHAINE
+    for r in lignes:
+        if r["n"] != attendu_n:
+            return rompu(attendu_n, "ligne {} absente".format(attendu_n))
+        if r["precedente"] != attendu_prec:
+            return rompu(r["n"], "maillon decroche de la ligne precedente")
+        recalcul = empreinte_journal(r["n"], r["precedente"], r["le"], r["par"],
+                                     r["action"], r["cible"], r["avant"],
+                                     r["apres"])
+        if recalcul != r["empreinte"]:
+            return rompu(r["n"], "contenu modifie")
+        attendu_n, attendu_prec = r["n"] + 1, r["empreinte"]
+    if tete is None or tete["n"] != attendu_n - 1 or tete["empreinte"] != attendu_prec:
+        return rompu(attendu_n - 1, "la tete ne correspond pas a la derniere ligne")
+    return {"ok": True, "chainees": len(lignes), "hors_chaine": hors,
+            "rupture": None, "tete": tete["n"]}
 
 
 def lire_journal(conn, limite=200):

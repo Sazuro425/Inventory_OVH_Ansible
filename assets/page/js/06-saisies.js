@@ -373,6 +373,21 @@ function ecarts(avant, apres) {
 
 async function afficherJournal() {
   const corps = ouvrirTiroir('Journal des saisies', '200 dernières');
+  if (droits.admin) {
+    // la chaine : une ligne modifiee ou effacee, meme en base, se voit ici
+    const etat = el('p', { className: 'lecture', textContent: 'Vérification de la chaîne…' });
+    corps.appendChild(etat);
+    fetch('/api/journal/integrite', { headers: { Accept: 'application/json' } })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('refus (' + r.status + ')')))
+      .then(v => {
+        etat.className = 'msg ' + (v.ok ? 'ok' : 'ko');
+        etat.textContent = v.ok
+          ? '✓ Chaîne intacte : ' + v.chainees + ' ligne(s) chaînée(s)'
+            + (v.hors_chaine ? ', ' + v.hors_chaine + ' antérieure(s) hors chaîne' : '')
+          : '⚠ Chaîne rompue à la ligne ' + v.rupture.n + ' : ' + v.rupture.motif;
+      })
+      .catch(e => { etat.textContent = 'Chaîne non vérifiée : ' + e.message; });
+  }
   try {
     const r = await fetch('/api/journal', { headers: { Accept: 'application/json' } });
     if (!r.ok) throw new Error('refus (' + r.status + ')');

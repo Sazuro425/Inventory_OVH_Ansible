@@ -41,8 +41,13 @@ CREATE USER IF NOT EXISTS 'inventory'@'localhost'
   IDENTIFIED VIA mysql_native_password USING PASSWORD('MOT_DE_PASSE_A_DEFINIR');
 ALTER USER 'inventory'@'localhost'
   IDENTIFIED VIA mysql_native_password USING PASSWORD('MOT_DE_PASSE_A_DEFINIR');
--- Droits d'ecriture des donnees
-GRANT SELECT, INSERT, UPDATE, DELETE ON inventory.* TO 'inventory'@'localhost';
+-- Droits d'ecriture des donnees. Pas de DELETE sur la base entiere : il
+-- l'a sur les deux seules tables qu'il purge (sql/droits.sql, apres le
+-- schema). Le GRANT puis REVOKE retire un DELETE global laisse par une
+-- installation anterieure, sans echouer s'il n'y en avait pas.
+GRANT SELECT, INSERT, UPDATE ON inventory.* TO 'inventory'@'localhost';
+GRANT DELETE ON inventory.* TO 'inventory'@'localhost';
+REVOKE DELETE ON inventory.* FROM 'inventory'@'localhost';
 
 -- Droits de structure : necessaires seulement si tu veux que les scripts
 -- creent la base et les tables tout seuls (db.auto_schema dans infra.yml).

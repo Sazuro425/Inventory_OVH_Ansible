@@ -34,22 +34,43 @@ function etatRecolte(h) {
   return { texte: 'joignable', classe: 'ok' };
 }
 
+// Jours restants avant l'echeance declaree d'un depot, ou null si inconnue.
+function joursRestants(h) {
+  const d = h.depot;
+  if (!d || !d.expire_le || d.etat === 'refuse') return null;
+  const fin = new Date(d.expire_le + 'T23:59:59');
+  return Math.floor((fin - Date.now()) / 86400000);
+}
+
+const SOUS_PEU = 30;
+
 function sourceJeton(h) {
   const d = h.depot;
+  const j = joursRestants(h);
+  const fin = d && d.expire_le ? ' · expire le ' + d.expire_le
+    + (j !== null && j >= 0 ? ' (dans ' + j + ' j)' : '') : '';
+  // une echeance passee ou proche l'emporte : c'est elle qu'il faut voir
+  if (j !== null && j < 0) {
+    return { texte: 'jeton expiré le ' + d.expire_le + ' : à renouveler',
+             classe: 'ko', badge: 'expiré' };
+  }
   if (d && d.etat === 'en_attente') {
     return { texte: 'déposé le ' + d.depose_le + ' par ' + d.depose_par
-                    + ', testé à la prochaine collecte', classe: 'attente' };
+                    + ', testé à la prochaine collecte' + fin,
+             classe: 'attente', badge: 'en attente' };
   }
   if (h.jeton_infra_yml) return { texte: 'nommé dans infra.yml', classe: '' };
   if (d && d.etat === 'accepte') {
-    return { texte: 'déposé par ' + d.depose_par + ', accepté le ' + d.traite_le,
-             classe: 'ok' };
+    const proche = j !== null && j <= SOUS_PEU;
+    return { texte: 'déposé par ' + d.depose_par + ', accepté le ' + d.traite_le + fin,
+             classe: proche ? 'attente' : 'ok',
+             badge: proche ? 'expire sous ' + Math.max(j, 0) + ' j' : 'déposé' };
   }
   if (d && d.etat === 'refuse') {
     return { texte: 'dépôt refusé le ' + d.traite_le + ' : ' + (d.motif || '?'),
-             classe: 'ko' };
+             classe: 'ko', badge: 'refusé' };
   }
-  return { texte: 'jeton par défaut (default_token)', classe: '' };
+  return { texte: 'jeton par défaut (default_token), échéance inconnue', classe: '' };
 }
 
 function ficheRecolte(n) {
@@ -69,8 +90,11 @@ function ficheRecolte(n) {
   document.getElementById('fiche-vente').appendChild(d);
 }
 
+// injoignables d'abord, puis l'echeance la plus proche, puis le nom
 const trierRecolte = hotes => [...hotes].sort((a, b) =>
-  (a.joignable - b.joignable) || a.hote.localeCompare(b.hote, 'fr', { numeric: true }));
+  (a.joignable - b.joignable)
+  || ((joursRestants(a) ?? Infinity) - (joursRestants(b) ?? Infinity))
+  || a.hote.localeCompare(b.hote, 'fr', { numeric: true }));
 
 async function afficherRecolte() {
   const corps = ouvrirTiroir('Récolte PVE', 'jetons par hyperviseur');
@@ -83,9 +107,12 @@ async function afficherRecolte() {
   const actifs = d.hotes.filter(h => !h.ignore);
   const ko = actifs.filter(h => !h.joignable).length;
   const attente = actifs.filter(h => h.depot && h.depot.etat === 'en_attente').length;
+  const echeances = actifs.filter(h => { const j = joursRestants(h); return j !== null && j <= SOUS_PEU; }).length;
   corps.appendChild(el('p', { className: 'lecture', textContent:
     actifs.length + ' hyperviseur(s) : ' + (actifs.length - ko) + ' joignable(s), '
     + ko + ' injoignable(s)' + (attente ? ', ' + attente + ' dépôt(s) en attente' : '')
+    + (echeances ? ', ' + echeances + ' jeton(s) expiré(s) ou à renouveler sous '
+                   + SOUS_PEU + ' jours' : '')
     + '. Photo de la collecte du ' + new Date(d.genere_le * 1000).toLocaleString('fr-FR') + '.' }));
   if (!d.pret) {
     corps.appendChild(el('p', { className: 'msg ko', textContent:
@@ -102,8 +129,8 @@ async function afficherRecolte() {
                    title: [h.hote, h.cluster && 'cluster ' + h.cluster, h.erreur, j.texte]
                      .filter(Boolean).join('\n') }),
       el('span', { className: 'etat-recolte ' + e.classe, textContent: e.texte }),
-      j.classe ? el('span', { className: 'etat-recolte ' + j.classe, textContent:
-        { attente: 'en attente', ok: 'déposé', ko: 'refusé' }[j.classe] }) : null);
+      j.badge ? el('span', { className: 'etat-recolte ' + j.classe, textContent: j.badge })
+              : null);
     if (d.pret) li.appendChild(el('button', { textContent: 'Déposer',
                                               onclick: () => formDepot([h.hote]) }));
     ul.appendChild(li);
@@ -115,11 +142,20 @@ async function afficherRecolte() {
   }
 }
 
-const COMMANDES_PVE = [
+// Les commandes de creation du compte de recolte, avec l'echeance choisie :
+// la date que PVE appliquera est celle que la page gardera.
+const commandesPve = echeance => [
   'pveum user add inventory@pve --comment "inventaire, lecture seule"',
   'pveum aclmod / --user inventory@pve --role PVEAuditor',
-  'pveum user token add inventory@pve readonly --privsep 0',
+  'pveum user token add inventory@pve readonly --privsep 0'
+    + (echeance ? " --expire $(date -d '" + echeance + " 23:59:59' +%s)" : ''),
 ].join('\n');
+
+function dansUnAn() {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() + 1);
+  return d.toISOString().slice(0, 10);
+}
 
 function formDepot(choisis) {
   const d = recolte.data;
@@ -129,11 +165,12 @@ function formDepot(choisis) {
     'Scellé dès réception : ce service ne peut plus le relire. La prochaine '
     + 'collecte le teste sur chaque hyperviseur coché, puis le range chiffré '
     + 'ou le refuse avec son motif.' }));
+  const pre = el('pre');
   corps.appendChild(el('details', null,
     el('summary', { textContent: 'Créer le compte de récolte sur l’hyperviseur' }),
-    el('pre', { textContent: COMMANDES_PVE }),
+    pre,
     el('button', { type: 'button', textContent: 'Copier les commandes',
-      onclick: () => navigator.clipboard.writeText(COMMANDES_PVE)
+      onclick: () => navigator.clipboard.writeText(pre.textContent)
         .then(() => flash('Commandes copiées.'), () => flash('Copie refusée par le navigateur.')) }),
     el('p', { className: 'lecture', textContent:
       'Sur un seul nœud par cluster : compte et jeton valent pour tout le cluster. '
@@ -145,6 +182,11 @@ function formDepot(choisis) {
   const secret = champ(f, 'Valeur du jeton (value)', { type: 'password',
     autocomplete: 'off', required: true, maxLength: 36, spellcheck: false,
     placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' });
+  const echeance = champ(f, 'Échéance du jeton (pveum --expire)', { type: 'date',
+    value: dansUnAn(), min: new Date(Date.now() + 86400000).toISOString().slice(0, 10) });
+  const majCommandes = () => { pre.textContent = commandesPve(echeance.value); };
+  echeance.addEventListener('input', majCommandes);
+  majCommandes();
 
   // les noeuds d'un meme cluster partagent compte et jeton : coches d'office
   const clusters = new Set(d.hotes.filter(h => choisis.includes(h.hote) && h.cluster)
@@ -169,7 +211,7 @@ function formDepot(choisis) {
     if (!hotes.length) { message(f, 'coche au moins un hyperviseur', false); return; }
     const jeton = ident.value.trim() + '=' + secret.value.trim();
     soumettre(f, async () => {
-      await poster('/api/recolte/jeton', { hotes, jeton });
+      await poster('/api/recolte/jeton', { hotes, jeton, expire_le: echeance.value });
       secret.value = '';
       await chargerRecolte();
     }, 'Jeton scellé pour ' + hotes.length + ' hyperviseur(s) : testé à la prochaine collecte.');

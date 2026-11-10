@@ -42,6 +42,7 @@ FORMAT_JETON = re.compile(
     r"^[A-Za-z0-9._-]{1,64}@[A-Za-z0-9._-]{1,32}![A-Za-z0-9._-]{1,64}="
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 HOTES_MAX = 64
+ECHEANCE_MAX = dt.timedelta(days=5 * 366)
 _SQL = inventory_db.pymysql.Error if inventory_db.pymysql else ()
 
 
@@ -119,8 +120,9 @@ def ouvrir(privee, scelle, contexte):
 # Controle d'un depot, sans base
 # ---------------------------------------------------------------------------
 
-def verifier_depot(charge, hotes_connus):
-    """Rend (hotes, jeton). hotes_connus : les reverse du dernier snapshot.
+def verifier_depot(charge, hotes_connus, aujourd_hui=None):
+    """Rend (hotes, jeton, echeance). hotes_connus : les reverse du dernier
+    snapshot. echeance : la date d'expiration declaree, ou None.
 
     On ne depose que pour un hote que la collecte connait : un nom tape a la
     main finirait en secret orphelin que personne ne lit jamais.
@@ -144,7 +146,19 @@ def verifier_depot(charge, hotes_connus):
                     str(h)[:80]))
         if h not in propres:
             propres.append(h)
-    return propres, jeton.strip()
+    aujourd_hui = aujourd_hui or dt.date.today()
+    echeance = None
+    if charge.get("expire_le") not in (None, ""):
+        try:
+            echeance = dt.date.fromisoformat(str(charge["expire_le"]))
+        except ValueError:
+            raise inventory_db.VenteInvalide(
+                "echeance illisible : AAAA-MM-JJ attendu") from None
+        if echeance <= aujourd_hui:
+            raise inventory_db.VenteInvalide("l'echeance est deja passee")
+        if echeance > aujourd_hui + ECHEANCE_MAX:
+            raise inventory_db.VenteInvalide("echeance a plus de cinq ans")
+    return propres, jeton.strip(), echeance
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +179,7 @@ def cle_publique(conn):
     return (r["version"], bytes(r["publique"])) if r else None
 
 
-def deposer(conn, hotes, jeton, par):
+def deposer(conn, hotes, jeton, par, echeance=None):
     """Scelle le jeton pour chaque hote et l'enregistre en attente."""
     cle = cle_publique(conn)
     if cle is None:
@@ -179,9 +193,10 @@ def deposer(conn, hotes, jeton, par):
             for h in hotes:
                 cur.execute(
                     "INSERT INTO depot_jeton (hote, cle_version, scelle, "
-                    "depose_le, depose_par, etat) "
-                    "VALUES (%s, %s, %s, %s, %s, 'en_attente')",
-                    (h, version, sceller(publique, jeton, h), maintenant, par))
+                    "depose_le, depose_par, expire_le, etat) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, 'en_attente')",
+                    (h, version, sceller(publique, jeton, h), maintenant, par,
+                     echeance))
                 # le journal dit qui a depose pour quel hote, jamais quoi
                 inventory_db.journaliser(cur, par, "depot jeton pve",
                                          "hote " + h, None,
@@ -199,16 +214,20 @@ def etat_depots(conn):
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT d.hote, d.etat, d.depose_le, d.depose_par, d.traite_le,"
-                " d.motif FROM depot_jeton d JOIN (SELECT hote, MAX(id) AS id "
+                " d.motif, d.expire_le FROM depot_jeton d JOIN (SELECT hote, "
+                "MAX(id) AS id "
                 "FROM depot_jeton GROUP BY hote) m ON m.id = d.id")
             lignes = cur.fetchall()
     except _SQL as exc:
         if (exc.args[0] if exc.args else 0) == 1146:
             return {}
         raise inventory_db._traduit(exc, "la lecture des depots") from exc
-    return {r["hote"]: {k: (v.isoformat(sep=" ", timespec="minutes")
-                            if isinstance(v, dt.datetime) else v)
-                        for k, v in r.items() if k != "hote"} for r in lignes}
+    def lisible(v):
+        if isinstance(v, dt.datetime):
+            return v.isoformat(sep=" ", timespec="minutes")
+        return v.isoformat() if isinstance(v, dt.date) else v
+    return {r["hote"]: {k: lisible(v) for k, v in r.items() if k != "hote"}
+            for r in lignes}
 
 
 # ---------------------------------------------------------------------------

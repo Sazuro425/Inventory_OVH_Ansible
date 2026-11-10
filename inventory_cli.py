@@ -9,6 +9,7 @@ inventory - administration des secrets de l'inventaire.
     inventory --db                   change le mot de passe de la base
     inventory --rotate-key           rechiffre tout sous une nouvelle clef
     inventory --migrer               applique les migrations du schema
+    inventory --verifier-journal     verifie la chaine du journal des saisies
     inventory --init-depot           tire la clef de la boite de depot PVE
     inventory --traiter-depots       teste et range les jetons deposes depuis
                                      la page (collecte.sh le lance)
@@ -368,6 +369,23 @@ def commande_ovh(args, conf, conn, cle):
 nom_secret_pve = secret_store.nom_secret_pve
 
 
+def commande_verifier_journal(args, conf, conn):
+    """Parcourt la chaine du journal. Code 1 si elle est rompue."""
+    v = inventory_db.verifier_journal(conn)
+    n, emp = inventory_db.tete_journal(conn)
+    print("  lignes chainees : {}   hors chaine (avant 0003) : {}".format(
+        v["chainees"], v["hors_chaine"]))
+    print("  tete            : n={} {}".format(n, emp))
+    if v["ok"]:
+        print("  chaine intacte")
+        return 0
+    erreur("chaine rompue a la ligne {} : {}".format(
+        v["rupture"]["n"], v["rupture"]["motif"]))
+    erreur("compare la tete aux ancres que la collecte ecrit dans son "
+           "journal systeme : journalctl -u inventaire-collecte | grep ancre")
+    return 1
+
+
 def commande_migrer(args, conf, conn):
     """Met la base a la version du code. Ni clef maitresse ni secret."""
     avant = inventory_db.version_schema(conn)
@@ -376,7 +394,7 @@ def commande_migrer(args, conf, conn):
     print("  schema : v{} -> v{}{}".format(
         avant, apres, "" if faites else " (rien a faire)"))
     if faites:
-        print("  puis, en root : mariadb < sql/droits_web.sql")
+        print("  puis, en root : mariadb < sql/droits.sql")
     return 0
 
 
@@ -666,6 +684,8 @@ def main():
                    help="rechiffre tout sous une nouvelle clef")
     g.add_argument("--migrer", action="store_true",
                    help="applique les migrations du schema (sql/migrations)")
+    g.add_argument("--verifier-journal", action="store_true",
+                   help="verifie la chaine du journal des saisies")
     g.add_argument("--init-depot", action="store_true",
                    help="tire la clef de la boite de depot des jetons PVE")
     g.add_argument("--traiter-depots", action="store_true",
@@ -730,6 +750,8 @@ def main():
             return commande_traiter_depots(args, conf, conn)
         if args.migrer:
             return commande_migrer(args, conf, conn)
+        if args.verifier_journal:
+            return commande_verifier_journal(args, conf, conn)
 
         cle = secret_store.charger_cle_maitresse()
         if args.init_depot:

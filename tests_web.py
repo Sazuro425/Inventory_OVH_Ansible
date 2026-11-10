@@ -489,13 +489,24 @@ def _():
     connus = {"ns1.eu", "ns2.eu"}
     egal(ds.verifier_depot({"jeton": " " + JETON + " ",
                             "hotes": ["ns1.eu", "ns2.eu", "ns1.eu"]}, connus),
-         (["ns1.eu", "ns2.eu"], JETON))
+         (["ns1.eu", "ns2.eu"], JETON, None))
     refuse(ds.verifier_depot, {"jeton": "inventory@pve!readonly=pas-un-uuid",
                                "hotes": ["ns1.eu"]}, connus)
     refuse(ds.verifier_depot, {"jeton": JETON + chr(10) + "x",
                                "hotes": ["ns1.eu"]}, connus)
     refuse(ds.verifier_depot, {"jeton": JETON, "hotes": ["ns9.eu"]}, connus)
     refuse(ds.verifier_depot, {"jeton": JETON, "hotes": []}, connus)
+
+
+@test("depot : une echeance a venir, a cinq ans au plus")
+def _():
+    import datetime as dt
+    connus, jour = {"ns1.eu"}, dt.date(2026, 11, 10)
+    base = {"jeton": JETON, "hotes": ["ns1.eu"]}
+    egal(ds.verifier_depot(dict(base, expire_le="2027-11-10"), connus, jour)[2],
+         dt.date(2027, 11, 10))
+    for mauvais in ("2026-11-10", "2020-01-01", "2033-01-01", "10/11/2027"):
+        refuse(ds.verifier_depot, dict(base, expire_le=mauvais), connus, jour)
 
 
 @test("traitement : le dernier depot d'un hote compte, teste puis range")

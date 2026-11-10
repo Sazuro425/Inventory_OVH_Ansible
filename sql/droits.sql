@@ -1,11 +1,27 @@
--- Droits du compte du service web, et rien d'autre.
+-- Droits table par table des deux comptes : la collecte et le service web.
 --
---   mariadb < sql/droits_web.sql
+--   mariadb < sql/droits.sql
 --
 -- A rejouer apres chaque mise a jour du schema (inventory_cli.py --migrer) :
 -- une table ajoutee n'est lisible du service qu'une fois son GRANT pose.
--- Aucun mot de passe ici, le fichier se rejoue sans rien savoir du compte,
--- que sql/setup_db_web.sql a cree une fois pour toutes.
+-- Aucun mot de passe ici, le fichier se rejoue sans rien savoir des comptes,
+-- que sql/setup_db.sql et sql/setup_db_web.sql ont crees une fois pour toutes.
+-- Il vient apres le schema : MariaDB refuse un GRANT sur une table qui
+-- n'existe pas encore.
+
+-- ---------------------------------------------------------------------------
+-- Compte de collecte
+-- ---------------------------------------------------------------------------
+-- SELECT, INSERT, UPDATE sur toute la base (setup_db.sql) ; DELETE sur les
+-- deux seules tables qu'il purge. Les snapshots d'un vieux run partent avec
+-- lui, par la cle etrangere (ON DELETE CASCADE), sans droit de plus. Le
+-- journal des saisies, les ventes, les secrets : rien de cela ne s'efface.
+GRANT DELETE ON inventory.collect_run   TO 'inventory'@'localhost';
+GRANT DELETE ON inventory.client_token  TO 'inventory'@'localhost';
+
+-- ---------------------------------------------------------------------------
+-- Compte du service web
+-- ---------------------------------------------------------------------------
 
 -- Lecture de l'inventaire. Table par table, jamais inventory.* : un GRANT
 -- sur la base entiere couvrirait secret_store, et couvrirait d'office toute
@@ -71,6 +87,10 @@ GRANT SELECT, INSERT ON inventory.depot_jeton
 -- entre les mains d'un attaquant.
 GRANT SELECT, INSERT ON inventory.journal_saisie
   TO 'inventory_web'@'localhost';
+-- La tete de la chaine : lue et avancee a chaque saisie. La reecrire ne
+-- rendrait aucune ligne passee modifiable sans que la verification le voie.
+GRANT SELECT, UPDATE ON inventory.journal_tete
+  TO 'inventory_web'@'localhost';
 
 -- Vues de rentabilite enregistrees : des filtres nommes, pas des donnees.
 -- Meme regle que le reste, pas de DELETE.
@@ -108,7 +128,7 @@ SELECT grantee, privilege_type
   FROM information_schema.schema_privileges
  WHERE grantee LIKE "'inventory_web'%";
 
--- Un DELETE ou un DROP ou que ce soit : ce compte ne detruit rien.
+-- Un DELETE ou un DROP ou que ce soit : le compte web ne detruit rien.
 SELECT grantee, table_name, privilege_type
   FROM information_schema.table_privileges
  WHERE grantee LIKE "'inventory_web'%"
@@ -119,7 +139,7 @@ SELECT grantee, table_name, privilege_type
 -- Verification : les tables en ecriture doivent etre exactement
 --   client_token, commercial, element, role, role_carte,
 --   session_locale, surcharge, vue_rentabilite      INSERT,UPDATE
---   compte_local                                    UPDATE
+--   compte_local, journal_tete                      UPDATE
 --   depot_jeton, journal_saisie                     INSERT
 -- ---------------------------------------------------------------------------
 
@@ -128,3 +148,13 @@ SELECT table_name, GROUP_CONCAT(privilege_type ORDER BY privilege_type) AS droit
  WHERE grantee LIKE "'inventory_web'%"
    AND privilege_type <> 'SELECT'
  GROUP BY table_name;
+
+-- Le compte de collecte : DELETE sur collect_run et client_token, nulle part
+-- ailleurs, et plus au niveau de la base.
+SELECT 'collecte' AS compte, table_name, privilege_type
+  FROM information_schema.table_privileges
+ WHERE grantee LIKE "'inventory'@%" AND privilege_type = 'DELETE'
+UNION ALL
+SELECT 'collecte (base entiere !)', table_schema, privilege_type
+  FROM information_schema.schema_privileges
+ WHERE grantee LIKE "'inventory'@%" AND privilege_type = 'DELETE';

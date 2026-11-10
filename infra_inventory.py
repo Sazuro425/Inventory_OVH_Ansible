@@ -909,6 +909,16 @@ def main():
                     n = inventory_db.purger_jetons_clients(conn)
                     if n:
                         log("{} jeton(s) client perime(s) purge(s)".format(n))
+                    # L'ancre du journal des saisies, recopiee dans le journal
+                    # systeme : une chaine reecrite en entier dans la base ne
+                    # retomberait pas sur ces empreintes.
+                    try:
+                        rang, emp = inventory_db.tete_journal(conn)
+                        log("ancre du journal des saisies : n={} {}".format(
+                            rang, emp))
+                    except Exception as exc:  # table absente avant 0003
+                        log("ancre du journal illisible : {}".format(
+                            str(exc).splitlines()[0]))
                     conn.close()
                 except inventory_db.DbError as exc:
                     log("base non alimentee : " + str(exc))

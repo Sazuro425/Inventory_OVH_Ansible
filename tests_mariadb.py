@@ -124,8 +124,8 @@ def mettre_en_place():
     finally:
         c.close()
     sql_root(script("setup_db_web.sql"))
-    sql_root(script("droits_web.sql"))
-    sql_root(script("droits_web.sql"))               # rejouable
+    sql_root(script("droits.sql"))
+    sql_root(script("droits.sql"))               # rejouable
 
 
 # --------------------------------------------------------------------------
@@ -305,8 +305,10 @@ def _():
         c.close()
     w = service()
     try:
-        egal(ds.deposer(w, [hote], jeton_pve, "evan"), 1)
-        egal(ds.etat_depots(w)[hote]["etat"], "en_attente")
+        echeance = dt.date.today() + dt.timedelta(days=365)
+        egal(ds.deposer(w, [hote], jeton_pve, "evan", echeance), 1)
+        etat = ds.etat_depots(w)[hote]
+        egal((etat["etat"], etat["expire_le"]), ("en_attente", echeance.isoformat()))
         refuse_sql(lambda: secret_store.lire(w, ds.NOM_CLE_PRIVEE, cle))
         with w.cursor() as cur:
             refuse_sql(lambda: cur.execute(
@@ -397,6 +399,73 @@ def _():
     egal((parent, cible), (ref, ref))
 
 
+@test("collecte : DELETE refuse partout, sauf ses deux purges")
+def _():
+    c = collecte()
+    try:
+        with c.cursor() as cur:
+            for table in ("journal_saisie", "commercial", "element",
+                          "secret_store", "guest_snapshot"):
+                refuse_sql(lambda t=table: cur.execute("DELETE FROM " + t))
+        c.rollback()
+        db.store_run(c, DATA)                  # un second run, a purger
+        egal(db.purge(c, 1) >= 1, True, "purge des vieux runs, en cascade")
+        egal(db.load_latest(c) is not None, True, "le dernier run reste")
+        egal(db.purger_jetons_clients(c) >= 0, True)
+    finally:
+        c.close()
+
+
+@test("journal : la chaine tient sous des ecritures concurrentes")
+def _():
+    import threading
+    erreurs = []
+
+    def ecrire(qui):
+        w = service()
+        try:
+            for i in range(15):
+                with w.cursor() as cur:
+                    db.journaliser(cur, qui, "essai", "cible {}".format(i))
+                w.commit()
+        except Exception as exc:  # remonte dans le test
+            erreurs.append(exc)
+        finally:
+            w.close()
+    fils = [threading.Thread(target=ecrire, args=("fil{}".format(k),))
+            for k in range(4)]
+    for f in fils:
+        f.start()
+    for f in fils:
+        f.join()
+    egal(erreurs, [])
+    c = collecte()
+    try:
+        v = db.verifier_journal(c)
+    finally:
+        c.close()
+    egal(v["ok"], True, "chaine intacte : {}".format(v["rupture"]))
+    egal(v["chainees"] >= 60, True)
+
+
+@test("journal : une ligne modifiee ou effacee, meme en root, se voit")
+def _():
+    c = collecte()
+    try:
+        egal(db.verifier_journal(c)["ok"], True)
+        sql_root("UPDATE journal_saisie SET apres = '{}' WHERE n = 3", "inventory")
+        c.commit()        # REPEATABLE READ : relire hors de la photo precedente
+        v = db.verifier_journal(c)
+        egal((v["ok"], v["rupture"]["n"], v["rupture"]["motif"]),
+             (False, 3, "contenu modifie"))
+        sql_root("DELETE FROM journal_saisie WHERE n = 3", "inventory")
+        c.commit()
+        v = db.verifier_journal(c)
+        egal((v["rupture"]["n"], v["rupture"]["motif"]), (3, "ligne 3 absente"))
+    finally:
+        c.close()
+
+
 # --------------------------------------------------------------------------
 
 def main():
@@ -414,7 +483,7 @@ def main():
         traceback.print_exc()
         return 1
     print("base recreee : setup_db.sql, schema.sql x2, setup_db_web.sql, "
-          "droits_web.sql x2")
+          "droits.sql x2")
     reussis, echecs = 0, []
     for libelle, fn in CAS:
         try:

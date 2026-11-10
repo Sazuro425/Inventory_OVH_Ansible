@@ -74,12 +74,12 @@ Puis les migrations, le compte web, et ses droits :
 python3 inventory_cli.py --migrer             # sous le compte de collecte
 # remplacer MOT_DE_PASSE_WEB_A_DEFINIR d'abord
 mariadb -u root -p < sql/setup_db_web.sql
-mariadb -u root -p < sql/droits_web.sql
+mariadb -u root -p < sql/droits.sql
 ```
 
 `setup_db_web.sql` ne fait que creer `inventory_web` (ou changer son mot de
 passe) : rejouer tout `setup_db.sql` reposerait le mot de passe du compte de
-collecte au marqueur du fichier. `droits_web.sql` ne contient que les droits,
+collecte au marqueur du fichier. `droits.sql` ne contient que les droits,
 sans mot de passe, et porte les requetes de verification : c'est lui qu'on
 rejoue apres chaque mise a jour.
 
@@ -91,13 +91,13 @@ mariadb -u root -p < sql/setup_db.sql
 mariadb -u root -p inventory < sql/schema.sql
 python3 inventory_cli.py --migrer             # sous le compte de collecte
 mariadb -u root -p < sql/setup_db_web.sql
-mariadb -u root -p < sql/droits_web.sql
+mariadb -u root -p < sql/droits.sql
 ```
 
 Dans cet ordre, et pas autrement : `setup_db.sql` cree la base et le compte
 de collecte, `schema.sql` cree les tables (version 1), `--migrer` applique
 les versions suivantes, `setup_db_web.sql` cree le compte web,
-`droits_web.sql` lui donne ses droits. MariaDB refuse un `GRANT` sur une
+`droits.sql` lui donne ses droits. MariaDB refuse un `GRANT` sur une
 table qui n'existe pas encore (erreur 1146) : les droits viennent en dernier.
 
 `tests_mariadb.py` rejoue exactement cette sequence sur un MariaDB jetable.
@@ -308,6 +308,12 @@ Ce qu'un service web compromis obtiendrait : les jetons deposes **apres** la
 compromission, qu'il voit passer le temps de les sceller. Ni les depots
 anterieurs, ni un seul jeton deja en service.
 
+**Une echeance par jeton.** Le formulaire de depot propose un an et affiche
+la commande `pveum ... --expire` qui la pose sur l'hyperviseur ; la date est
+gardee avec le depot (migration 0004). La vue Recolte trie et signale les
+jetons expires ou a renouveler sous 30 jours. Un jeton pose autrement
+(`infra.yml`, `inventory --pve`) a une echeance inconnue de l'application.
+
 ---
 
 ## 8. Activer la collecte et le service web
@@ -462,6 +468,55 @@ curl -s -H 'X-Remote-User: admin' -H 'X-Remote-Groups: inventaire-admin' \
 
 Le parcours complet n'a pas encore ete suivi avec un vrai Authentik.
 
+#### MFA (NIS 2)
+
+L'application ne fait pas la MFA elle-meme : c'est Authentik qui l'exige, et
+l'application n'accepte que ce qu'Authentik a laisse passer.
+
+1. *Flows and Stages > Stages* : un **Authenticator Validation Stage**, classes
+   TOTP et WebAuthn, *Not configured action* sur **Force the user to configure
+   an authenticator** — un compte sans second facteur doit en enregistrer un a
+   sa prochaine connexion, au lieu de passer.
+2. *Flows* : un flow d'authentification propre a l'inventaire (copie de
+   `default-authentication-flow`), avec ce stage lie apres le mot de passe.
+3. Sur le **provider** de l'inventaire, *Authentication flow* : ce flow. Les
+   autres applications d'Authentik ne sont pas touchees.
+4. Verifier avec un compte de test : sans TOTP enregistre, Authentik doit
+   demander d'en configurer un avant de revenir sur l'inventaire.
+
+Pour aller plus loin, Apache peut refuser une session qui n'aurait pas passe
+la MFA, si Authentik la signale dans le jeton (claim `amr` ou `acr`). Ouvrir
+l'onglet *Preview* du provider apres une connexion avec MFA ; seulement si
+la claim y figure, ajouter dans le `<Location />` du vhost la ligne
+`Require claim amr:mfa` (a adapter a la valeur vue). Sans la claim, la ligne
+refuserait tout le monde.
+
+**Le mode local devient un recours.** Une fois l'OIDC en service
+(`web.auth: oidc`), les routes de connexion locale n'existent plus (404) et
+les comptes locaux, restes en base, ne servent plus. Revenir en arriere si
+Authentik tombe : `web.auth: local`, vhost `apache-inventaire-local.conf`,
+redemarrer le service — puis revenir a l'OIDC des qu'il est retabli.
+
+#### Journal des saisies chaine
+
+Chaque saisie, connexion ou depot de jeton s'inscrit dans `journal_saisie`,
+et chaque ligne porte l'empreinte de la precedente (migration 0003). Une
+ligne modifiee ou effacee, meme par un administrateur de la base, casse la
+chaine a cet endroit :
+
+```bash
+sudo systemd-run --quiet --pty --wait --collect -p User=inventaire \
+    -p WorkingDirectory=/opt/inventaire-infra \
+    -p LoadCredentialEncrypted=inventory_db_password:/etc/inventaire-infra/creds/inventory_db_password.cred \
+    python3 inventory_cli.py --verifier-journal
+```
+
+La page l'affiche aussi a un admin, en tete du tiroir *Journal*. Reste le
+cas d'une chaine entierement reecrite : a chaque passage, la collecte
+recopie la tete de la chaine dans **son journal systeme**, hors de la base
+(`journalctl -u inventaire-collecte | grep ancre`). Une tete qui ne retombe
+plus sur une ancre deja ecrite signale une reecriture.
+
 ---
 
 ## 10. Rentabilite, saisies et export
@@ -481,7 +536,7 @@ capacite allouee contre la capacite physique. Le calcul est dans
 2. Le schema a jour, puis les droits du compte web, **dans cet ordre** :
    un `GRANT` sur une table qui n'existe pas encore echoue (voir 12).
 
-   La derniere requete de `droits_web.sql` doit lister exactement :
+   La derniere requete de `droits.sql` doit lister exactement :
    `client_token`, `commercial`, `element`, `role`, `role_carte`,
    `session_locale`, `surcharge`, `vue_rentabilite` en INSERT,UPDATE,
    `compte_local` en UPDATE seul, `depot_jeton` et `journal_saisie` en
@@ -602,7 +657,7 @@ sudo systemd-run --quiet --pty --wait --collect -p User=inventaire \
     -p WorkingDirectory=/opt/inventaire-infra \
     -p LoadCredentialEncrypted=inventory_db_password:/etc/inventaire-infra/creds/inventory_db_password.cred \
     python3 inventory_cli.py --migrer
-sudo mariadb < sql/droits_web.sql
+sudo mariadb < sql/droits.sql
 sudo systemctl restart inventaire-web.service
 ```
 
