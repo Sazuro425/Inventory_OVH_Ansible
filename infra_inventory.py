@@ -909,6 +909,15 @@ def main():
                     n = inventory_db.purger_jetons_clients(conn)
                     if n:
                         log("{} jeton(s) client perime(s) purge(s)".format(n))
+                    # Le point du jour pour l'historique : courbes et projection
+                    # de capacite. Un echec ici n'invalide pas la collecte.
+                    try:
+                        n = inventory_db.historiser(
+                            conn, inventory_db.rentabilite(conn))
+                        log("historique : {} point(s) du jour".format(n))
+                    except Exception as exc:
+                        log("historique non alimente : {}".format(
+                            str(exc).splitlines()[0]))
                     # L'ancre du journal des saisies, recopiee dans le journal
                     # systeme : une chaine reecrite en entier dans la base ne
                     # retomberait pas sur ces empreintes.

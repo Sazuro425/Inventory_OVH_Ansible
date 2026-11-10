@@ -32,6 +32,8 @@ Routes :
     POST /api/elements    declare plusieurs enfants d'un coup (4 sites a 40 EUR)
     POST /api/role        pose ou leve le role d'un cluster, serveur ou VM
     POST /api/roles       ajoute un role au catalogue (web, LAMP, proxy...)
+    GET  /api/historique  ?niveau=parc|cluster|serveur : series mensuelles
+    GET  /api/projection  quand chaque cluster atteindra 85 % puis 100 % de RAM
     GET  /api/recolte     etat de la recolte PVE par hyperviseur (admin)
     POST /api/recolte/jeton  depose un jeton PVE, scelle (admin) : le service
                           ne peut pas le relire, la collecte le teste et le
@@ -92,6 +94,7 @@ from urllib.parse import parse_qs, urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import auth_locale  # noqa: E402
+import capacite  # noqa: E402
 import csp  # noqa: E402
 import depot_scelle  # noqa: E402
 import infra_inventory as orch  # noqa: E402
@@ -961,6 +964,36 @@ class Handler(BaseHTTPRequestHandler):
             "developpement": self.en_dev(),
             "deconnexion": None if self.en_dev() else retour + "?logout=",
         })
+
+    @route("GET", "/api/historique", "lecture")
+    def historique(self):
+        """Le dernier point de chaque mois, par carte, sur deux ans."""
+        niveau = (self.requete().get("niveau") or ["cluster"])[0]
+        if niveau not in ("parc", "cluster", "serveur"):
+            return self.repondre(400, {"erreur": "niveau : parc, cluster ou serveur"})
+        aujourd_hui = dt.date.today()
+        depuis = aujourd_hui.replace(day=1, year=aujourd_hui.year - 2)
+        lignes, echec = self.lire(
+            lambda c: inventory_db.lire_historique(c, depuis, niveau))
+        if echec:
+            return
+        self.repondre(200, {"niveau": niveau,
+                            "series": capacite.series_mensuelles(lignes, niveau)})
+
+    @route("GET", "/api/projection", "lecture")
+    def projection(self):
+        """La projection de capacite de chaque cluster, la plus urgente d'abord."""
+        aujourd_hui = dt.date.today()
+        lignes, echec = self.lire(lambda c: inventory_db.lire_historique(
+            c, aujourd_hui - capacite.FENETRE, "cluster"))
+        if echec:
+            return
+        self.repondre(200, {
+            "jour": aujourd_hui.isoformat(),
+            "fenetre_jours": capacite.FENETRE.days,
+            "seuils": {"ram_tendue": capacite.RAM_TENDUE,
+                       "vcpu_par_thread": capacite.VCPU_PAR_THREAD_MAX},
+            "projections": capacite.projections(lignes, aujourd_hui)})
 
     @route("GET", "/api/journal/integrite", "admin")
     def integrite_journal(self):

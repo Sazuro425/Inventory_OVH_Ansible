@@ -398,6 +398,29 @@ CREATE TABLE IF NOT EXISTS depot_jeton (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ---------------------------------------------------------------------------
+-- Historique, un point par jour et par carte (migration 0005) : le cout, le
+-- rendement et la capacite du parc, de chaque cluster et de chaque serveur.
+-- La collecte l'alimente ; le service web le lit pour les courbes et la
+-- projection de capacite.
+CREATE TABLE IF NOT EXISTS historique (
+  jour              DATE          NOT NULL,
+  niveau            ENUM('parc','cluster','serveur') NOT NULL,
+  cle               VARCHAR(190)  NOT NULL,
+  nom               VARCHAR(190)  NOT NULL,
+  pa                DECIMAL(12,2) NULL,
+  pv                DECIMAL(12,2) NULL,
+  roi               DECIMAL(12,2) NULL,
+  ram_alloue_mb     BIGINT        NULL,
+  ram_physique_mb   BIGINT        NULL,
+  vcpu_alloue       INT           NULL,
+  vcpu_physique     INT           NULL,
+  nb_vm             INT           NULL,
+  maj_le            DATETIME      NOT NULL,
+  PRIMARY KEY (jour, niveau, cle),
+  INDEX idx_historique_cle (niveau, cle, jour)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
 -- Journal de toutes les saisies : ventes, elements, corrections.
 --
 -- Le compte web y a INSERT et SELECT, jamais UPDATE ni DELETE : un defaut du

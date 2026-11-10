@@ -619,6 +619,25 @@ enregistrée rouvre ses panneaux et ses colonnes telles qu'elle les a
 laissees, et le serveur controle leur forme champ par champ
 (`db_vues.verifier_panneau`).
 
+**L'historique et la projection de capacité** (migration 0005). À chaque
+passage, la collecte inscrit un point du jour pour le parc, chaque cluster et
+chaque serveur : PA, CA, ROI, RAM et vCPU alloués et physiques, nombre de VM
+(`journalctl -u inventaire-collecte | grep historique`). Deux lectures :
+
+- la figure *Quand reprendre un serveur* (dans la vue d'ensemble) : pour
+  chaque cluster, les mois avant 100 % de RAM allouée au rythme des 90
+  derniers jours, en rouge sous 3 mois, en ambre sous 6 ; le tableau donne
+  aussi la date des 85 % et celle des 4 vCPU par thread. La pente porte sur
+  la RAM allouée et se prolonge jusqu'à la capacité physique actuelle : un
+  serveur ajouté au cluster repousse l'échéance au lieu de fausser la
+  tendance. Il faut deux semaines de points avant la première date ;
+- le panneau *Courbe dans le temps* : une mesure (CA, PA, ROI, marge, RAM
+  allouée, vCPU par thread, VM) du parc, ou des 4 clusters ou serveurs les
+  plus forts, au dernier point de chaque mois sur deux ans.
+
+Le calcul est dans `capacite.py`, sans base, et `tests_capacite.py` en fixe
+les règles.
+
 « Enregistrer la vue » garde sous un nom — *Commercial*, *Compta
 mensuelle* — les filtres, la presentation, le niveau et le tri du tableau.
 Une vue est partagee avec l'equipe par defaut, ou privee. Tout lecteur en

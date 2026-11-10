@@ -103,6 +103,9 @@ GRANT SELECT, INSERT, UPDATE ON inventory.vue_rentabilite
 GRANT SELECT, INSERT, UPDATE ON inventory.client_token
   TO 'inventory_web'@'localhost';
 
+-- Historique : lu pour les courbes et la projection, ecrit par la collecte.
+GRANT SELECT ON inventory.historique TO 'inventory_web'@'localhost';
+
 -- Version du schema : /api/sante dit si la base est en retard sur le code.
 GRANT SELECT ON inventory.schema_version
   TO 'inventory_web'@'localhost';

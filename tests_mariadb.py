@@ -167,6 +167,33 @@ def _():
     egal(len(lu["guests"]), len(DATA["guests"]), "invites")
 
 
+@test("historique : la collecte inscrit le jour, une fois ; le service le lit")
+def _():
+    import capacite
+    c = collecte()
+    try:
+        n = db.historiser(c, db.rentabilite(c))
+        egal(db.historiser(c, db.rentabilite(c)), n, "second passage du jour")
+        hier = dt.date.today() - dt.timedelta(days=1)
+        db.historiser(c, db.rentabilite(c), jour=hier)
+    finally:
+        c.close()
+    w = service()
+    try:
+        lignes = db.lire_historique(w, dt.date.today() - dt.timedelta(days=7))
+        with w.cursor() as cur:
+            refuse_sql(lambda: cur.execute(
+                "INSERT INTO historique (jour, niveau, cle, nom, maj_le) "
+                "VALUES (CURDATE(), 'parc', 'x', 'x', NOW())"))
+    finally:
+        w.close()
+    egal(len(lignes), 2 * n, "deux jours, un point par carte et par jour")
+    egal(n, len({(l["niveau"], l["cle"]) for l in lignes}), "une ligne par carte")
+    serie = capacite.series_mensuelles(lignes, "parc")
+    egal(len(serie), 1)
+    egal(serie[0]["points"][-1]["nb_vm"], float(len(DATA["guests"])))
+
+
 @test("service web : la rentabilite se calcule avec ses seuls droits")
 def _():
     c = service()

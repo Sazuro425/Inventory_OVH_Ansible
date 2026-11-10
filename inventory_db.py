@@ -54,6 +54,9 @@ from db_base import (  # noqa: F401
     version_schema,
 )
 from db_snapshots import (  # noqa: F401
+    COLONNES_HISTORIQUE,
+    historiser,
+    lire_historique,
     load_latest,
     purge,
     purger_jetons_clients,
@@ -97,9 +100,11 @@ from db_vues import (  # noqa: F401
     GROUPES_PANNEAU,
     LISTES_VUE,
     MODES_VUE,
+    NIVEAUX_COURBE,
     NIVEAUX_DONNEES,
     NIVEAUX_VUE,
     PANNEAUX_MAX,
+    SERIES_MAX,
     TYPES_PANNEAU,
     _identifiant,
     _vue_lisible,

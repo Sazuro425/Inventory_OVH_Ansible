@@ -223,3 +223,53 @@ def purge(conn, keep):
     conn.commit()
     return supprimes
 
+
+# ---------------------------------------------------------------------------
+# Historique : un point par jour et par carte (migration 0005)
+# ---------------------------------------------------------------------------
+
+COLONNES_HISTORIQUE = ("niveau", "cle", "nom", "pa", "pv", "roi", "ram_alloue_mb",
+                       "ram_physique_mb", "vcpu_alloue", "vcpu_physique", "nb_vm")
+
+
+def historiser(conn, resultat, jour=None):
+    """Inscrit les points du jour, tires de l'arbre de rentabilite. Un second
+    passage le meme jour remplace le premier. Rend le nombre de points."""
+    import capacite
+    jour = jour or dt.date.today()
+    maintenant = dt.datetime.now()
+    lignes = capacite.lignes_historique(resultat)
+    maj = ", ".join("{0} = VALUES({0})".format(c) for c in COLONNES_HISTORIQUE[2:])
+    try:
+        with conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO historique (jour, {}, maj_le) VALUES (%s, {}, %s) "
+                "ON DUPLICATE KEY UPDATE {}, maj_le = VALUES(maj_le)".format(
+                    ", ".join(COLONNES_HISTORIQUE),
+                    ", ".join(["%s"] * len(COLONNES_HISTORIQUE)), maj),
+                [[jour] + [l[c] for c in COLONNES_HISTORIQUE] + [maintenant]
+                 for l in lignes])
+    except pymysql.Error as exc:
+        conn.rollback()
+        raise _traduit(exc, "l'historique") from exc
+    conn.commit()
+    return len(lignes)
+
+
+def lire_historique(conn, depuis, niveau=None):
+    """Les points depuis une date, d'un niveau ou de tous. Une table absente
+    (avant la migration 0005) rend une liste vide."""
+    sql = "SELECT jour, {} FROM historique WHERE jour >= %s".format(
+        ", ".join(COLONNES_HISTORIQUE))
+    args = [depuis]
+    if niveau:
+        sql += " AND niveau = %s"
+        args.append(niveau)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql + " ORDER BY jour", args)
+            return [{k: _json_ok(v) for k, v in r.items()} for r in cur.fetchall()]
+    except pymysql.Error as exc:
+        if (exc.args[0] if exc.args else 0) == 1146:
+            return []
+        raise _traduit(exc, "la lecture de l'historique") from exc

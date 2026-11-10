@@ -31,8 +31,10 @@ LISTES_VUE = ("clusters", "datacenters", "clients", "roles")
 # identifiant de colonne ou de mesure qu'elle ne connait pas est ignore a
 # l'affichage, d'ou un simple controle de forme ici.
 NIVEAUX_DONNEES = ("cluster", "serveur", "vm", "element")
-TYPES_PANNEAU = ("figure", "barres", "chiffre", "tableau")
-FIGURES_PANNEAU = ("roi", "capa", "clients", "ram")
+TYPES_PANNEAU = ("figure", "barres", "chiffre", "tableau", "courbe")
+FIGURES_PANNEAU = ("roi", "capa", "clients", "ram", "projection")
+NIVEAUX_COURBE = ("parc", "cluster", "serveur")
+SERIES_MAX = 4
 GROUPES_PANNEAU = ("cluster", "serveur", "datacenter", "client", "role")
 PANNEAUX_MAX = 24
 COLONNES_MAX = 40
@@ -87,6 +89,18 @@ def verifier_panneau(p):
             raise VenteInvalide("figure inconnue : attendu "
                                 + ", ".join(FIGURES_PANNEAU))
         propre["figure"] = p["figure"]
+        return propre
+    if t == "courbe":
+        # l'historique : parc, clusters ou serveurs, quatre series au plus
+        if p.get("niveau") not in NIVEAUX_COURBE:
+            raise VenteInvalide("niveau de courbe : parc, cluster ou serveur")
+        if p.get("groupe") not in (None, ""):
+            raise VenteInvalide("une courbe ne se regroupe pas")
+        top = p.get("top", SERIES_MAX)
+        if isinstance(top, bool) or not isinstance(top, int) or not 1 <= top <= SERIES_MAX:
+            raise VenteInvalide("series d'une courbe : de 1 a {}".format(SERIES_MAX))
+        propre.update(niveau=p["niveau"], mesure=_identifiant(p.get("mesure"), "mesure"),
+                      top=top)
         return propre
     if p.get("niveau") not in NIVEAUX_DONNEES:
         raise VenteInvalide("niveau de panneau inconnu")

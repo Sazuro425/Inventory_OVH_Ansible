@@ -403,11 +403,13 @@
      propre surface ; le texte ne porte jamais la couleur d'une serie. */
   :root {
     --viz-1:#3987e5; --viz-2:#d95926; --viz-perte:#e66767;
+    --viz-3:#199e70; --viz-4:#c98500;
     --viz-tendu:#fab219; --viz-critique:#d03b3b;
     --viz-grille:#262c36; --viz-base:#4a525e; --viz-muet:#8b949e;
   }
   :root[data-theme="light"] {
     --viz-1:#2a78d6; --viz-2:#eb6834; --viz-perte:#e34948;
+    --viz-3:#1baf7a; --viz-4:#eda100;
     --viz-tendu:#fab219; --viz-critique:#d03b3b;
     --viz-grille:#e6e9ed; --viz-base:#b7bfc8; --viz-muet:#59636e;
   }
@@ -425,6 +427,22 @@
                background:none; color:var(--accent); font:inherit; font-weight:600;
                cursor:pointer; }
   .viz-ajout:hover { background:var(--accent-doux); }
+  /* courbes : quatre series au plus, couleurs categorielles dans l'ordre */
+  .courbe { fill:none; stroke-width:2; stroke-linejoin:round; stroke-linecap:round; }
+  .repere { stroke:var(--carte); stroke-width:2; }
+  .courbe.serie-1 { stroke:var(--viz-1); }  .repere.serie-1 { fill:var(--viz-1); }
+  .courbe.serie-2 { stroke:var(--viz-2); }  .repere.serie-2 { fill:var(--viz-2); }
+  .courbe.serie-3 { stroke:var(--viz-3); }  .repere.serie-3 { fill:var(--viz-3); }
+  .courbe.serie-4 { stroke:var(--viz-4); }  .repere.serie-4 { fill:var(--viz-4); }
+  .reticule { stroke:var(--viz-muet); stroke-width:1; stroke-dasharray:3 3; }
+  .legende { display:flex; flex-wrap:wrap; gap:4px 14px; font-size:11.5px;
+             color:var(--texte); margin:0 0 6px; }
+  .legende i { display:inline-block; width:14px; height:3px; border-radius:2px;
+               vertical-align:middle; margin-right:6px; }
+  .legende i.serie-1 { background:var(--viz-1); }
+  .legende i.serie-2 { background:var(--viz-2); }
+  .legende i.serie-3 { background:var(--viz-3); }
+  .legende i.serie-4 { background:var(--viz-4); }
   .chiffre-cle { padding:10px 2px 6px; }
   .chiffre-cle b { display:block; font-size:30px; font-weight:650; line-height:1.15;
                    font-variant-numeric:tabular-nums; }

@@ -273,6 +273,12 @@ def _():
         {"type": "barres", "niveau": "vm", "mesure": "ram", "groupe": "cluster",
          "top": 15, "titre": "RAM par cluster", "largeur": 1},
         {"type": "chiffre", "niveau": "serveur", "mesure": "pv", "largeur": 1}])
+    egal(db.verifier_vue({"nom": "x", "definition": {"panneaux": [
+        {"type": "courbe", "niveau": "parc", "mesure": "ram_pct", "top": 2},
+        {"type": "figure", "figure": "projection", "largeur": 2}]}})[3]["panneaux"],
+         [{"type": "courbe", "niveau": "parc", "mesure": "ram_pct", "top": 2,
+           "largeur": 1},
+          {"type": "figure", "figure": "projection", "largeur": 2}])
     egal(db.verifier_vue({"nom": "x", "definition": {"panneaux": []}})[3],
          {"panneaux": []}, "un tableau de bord vide reste un choix")
 
@@ -294,6 +300,11 @@ def _():
                            "top": 0}]),
             vue(panneaux=[{"type": "barres", "niveau": "vm", "mesure": "pv",
                            "groupe": "pays"}]),
+            vue(panneaux=[{"type": "courbe", "niveau": "vm", "mesure": "pv"}]),
+            vue(panneaux=[{"type": "courbe", "niveau": "cluster", "mesure": "pv",
+                           "top": 5}]),
+            vue(panneaux=[{"type": "courbe", "niveau": "cluster", "mesure": "pv",
+                           "groupe": "role"}]),
             vue(panneaux=[{"type": "chiffre", "niveau": "vm", "mesure": "pv"}] * 25)):
         refuse(db.verifier_vue, mauvais)
 

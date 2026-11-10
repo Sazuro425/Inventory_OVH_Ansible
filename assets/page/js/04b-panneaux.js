@@ -14,10 +14,12 @@ const PANNEAUX_DEFAUT = [
   { type: 'figure', figure: 'capa', largeur: 1 },
   { type: 'figure', figure: 'clients', largeur: 1 },
   { type: 'figure', figure: 'ram', largeur: 2 },
+  { type: 'figure', figure: 'projection', largeur: 2 },
 ];
 const NIVEAUX_PANNEAU = ['cluster', 'serveur', 'vm', 'element'];
 const TYPES_PANNEAU = [['barres', 'Barres'], ['chiffre', 'Chiffre clé'],
-                       ['tableau', 'Tableau'], ['figure', 'Figure prédéfinie']];
+                       ['tableau', 'Tableau'], ['courbe', 'Courbe dans le temps'],
+                       ['figure', 'Figure prédéfinie']];
 let edition = false;
 
 const panneauxCourants = () => vueRent.panneaux || PANNEAUX_DEFAUT;
@@ -96,6 +98,11 @@ function normPanneau(p) {
   if (p.type === 'figure') { o.figure = p.figure; return o; }
   o.niveau = p.niveau;
   o.mesure = p.mesure;
+  if (p.type === 'courbe') {
+    // des series, pas des lignes : quatre au plus, sans regroupement
+    o.top = Math.max(1, Math.min(4, parseInt(p.top, 10) || 4));
+    return o;
+  }
   if (p.groupe) o.groupe = p.groupe;
   if (p.type !== 'chiffre') o.top = Math.max(1, Math.min(100, parseInt(p.top, 10) || 10));
   return o;
@@ -104,6 +111,11 @@ function normPanneau(p) {
 function titrePanneau(p) {
   if (p.titre) return p.titre;
   if (p.type === 'figure') return (figure(p.figure) || {}).titre || 'Figure';
+  if (p.type === 'courbe') {
+    const mh = mesureHisto(p.mesure);
+    return (mh ? mh.titre : 'Courbe') + ', ' + (p.niveau === 'parc' ? 'parc entier'
+                                                : niveauTexte(p.niveau).toLowerCase());
+  }
   const m = mesure(p.mesure), g = groupe(p.groupe);
   if (!m) return 'Panneau';
   const niveau = (LIBELLE[p.niveau] || '').toLowerCase();
@@ -224,9 +236,37 @@ function panneau(mur, p, i, n) {
     }));
     dessin = () => {
       const rangs = f.rangs();
+      if (f.pret && !f.pret()) {
+        return zone.appendChild(el('p', { className: 'lecture',
+                                          textContent: 'Chargement de l’historique…' }));
+      }
+      if (!rangs.length && f.vide && !filtreRentActif()) {
+        return zone.appendChild(el('p', { className: 'lecture', textContent: f.vide }));
+      }
       if (!rangs.length) return graphVide(zone);
       if (enTable) tableFigure(zone, f, rangs);
       else f.dessiner(zone, rangs);
+    };
+  } else if (p.type === 'courbe') {
+    const d = donneesCourbe(p);
+    sous = 'Dernier point de chaque mois'
+      + (p.niveau === 'parc' ? '' : ', les ' + (p.top || 4) + ' plus forts au dernier mois');
+    if (d.series) {
+      outils.appendChild(outil('CSV', 'Exporter ces courbes en CSV', () => {
+        telechargerCsv('courbe-' + p.mesure + '-' + p.niveau, colonnesCourbe(d),
+                       d.mois.map(mois => ({ mois })));
+        flash(d.mois.length + ' mois exporté(s).');
+      }));
+    }
+    dessin = () => {
+      if (d.attente) {
+        return zone.appendChild(el('p', { className: 'lecture',
+                                          textContent: 'Chargement de l’historique…' }));
+      }
+      if (d.erreur) {
+        return zone.appendChild(el('p', { className: 'lecture alerte', textContent: d.erreur }));
+      }
+      dessinCourbe(zone, p, d);
     };
   } else {
     const d = donneesPanneau(p);
@@ -348,24 +388,37 @@ function formPanneau(index) {
   let premier = true;
 
   const maj = () => {
-    const n = niveau.value, t = type.value, estFig = t === 'figure';
+    const t = type.value, estFig = t === 'figure', courbe = t === 'courbe';
     // au premier passage, les listes sont vides : on part du panneau
     const m0 = premier ? p0.mesure : mes.value;
     const g0 = premier ? (p0.groupe || '') : grp.value;
+    const n0 = premier ? (p0.niveau || 'serveur') : niveau.value;
     premier = false;
-    mes.replaceChildren(...MESURES.filter(m => dispoAu(m, n)).map(m =>
+    // une courbe suit le parc, les clusters ou les serveurs ; les autres
+    // panneaux, les quatre niveaux de l'arbre
+    const niveaux = courbe ? NIVEAUX_COURBE : NIVEAUX_PANNEAU.map(x => [x, LIBELLE[x]]);
+    niveau.replaceChildren(...niveaux.map(([v, l]) =>
+      el('option', { value: v, textContent: l, selected: v === n0 })));
+    const n = niveau.value;
+    const mesures = courbe ? MESURES_HISTO : MESURES.filter(m => dispoAu(m, n));
+    mes.replaceChildren(...mesures.map(m =>
       el('option', { value: m.id, textContent: m.titre, selected: m.id === m0 })));
     grp.replaceChildren(...GROUPES.filter(g => dispoAu(g, n)).map(g =>
       el('option', { value: g.id, textContent: g.titre, selected: g.id === g0 })));
     fig.hidden = !estFig; etiquette(fig).hidden = !estFig;
-    for (const x of [niveau, mes, grp]) { x.hidden = estFig; etiquette(x).hidden = estFig; }
-    top.hidden = estFig || t === 'chiffre'; etiquette(top).hidden = top.hidden;
+    for (const x of [niveau, mes]) { x.hidden = estFig; etiquette(x).hidden = estFig; }
+    grp.hidden = estFig || courbe; etiquette(grp).hidden = grp.hidden;
+    top.hidden = estFig || t === 'chiffre' || (courbe && n === 'parc');
+    etiquette(top).hidden = top.hidden;
+    etiquette(top).textContent = courbe ? 'Séries au plus (4)' : 'Lignes au plus';
+    top.max = courbe ? 4 : 100;
     const m = mesure(mes.value);
     aide.textContent = estFig ? (figure(fig.value) || {}).sous || ''
       : m && m.ratio ? m.titre + ' est un ratio : un groupe le recalcule depuis ses '
                        + 'termes, sans moyenner des pourcentages.' : '';
   };
   [type, niveau, mes, fig].forEach(x => x.addEventListener('change', maj));
+  if (p0.type === 'courbe' && p0.top) top.value = p0.top;
   maj();
 
   f.appendChild(el('div', { className: 'actions' },
