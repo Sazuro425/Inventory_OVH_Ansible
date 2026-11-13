@@ -1,749 +1,682 @@
-# Inventaire d'infrastructure OVH → Proxmox → Ansible
+# Inventaire OVH → Proxmox → Ansible
 
-Chaîne d'inventaire : les serveurs dédiés chez OVH, les VM et conteneurs des
-hyperviseurs Proxmox installés dessus, le tout stocké en base et servi à
-Ansible comme inventaire dynamique.
+Inventaire et planification de capacité pour un parc de serveurs dédiés OVH
+qui portent des hyperviseurs Proxmox.
+
+La collecte interroge l'API OVH (les dédiés, leur prix et leurs options), puis
+l'API Proxmox de chaque hyperviseur (le matériel, les VM, les conteneurs). Elle
+range une photo complète du parc en base, à chaque passage. De cette base
+sortent trois choses :
+
+- **une page web** : la rentabilité et la capacité, du cluster jusqu'à la VM,
+  le schéma du parc, le dépôt des jetons Proxmox, la gestion des comptes ;
+- **un inventaire dynamique Ansible**, lu en base, sans toucher aux API
+  pendant un playbook ;
+- **un comparatif avec The Bastion** : ce qui est dans le parc sans accès
+  déclaré, et les accès qui ne mènent plus à rien.
+
+La question de fond est celle de la capacité : Zabbix et Grafana mesurent ce
+que les VM consomment, pas ce qui leur a été promis. Quand 180 Go de RAM sont
+alloués sur un serveur qui en a 192, il est temps d'en commander un autre,
+même si la RAM consommée est à 40 %. L'inventaire suit ces deux chiffres,
+alloué et physique, et projette la date à laquelle la RAM sera épuisée.
+
+---
+
+## Sommaire
+
+- [Ce que fait l'application](#ce-que-fait-lapplication)
+- [Démarrage rapide](#démarrage-rapide)
+- [Mettre à jour](#mettre-à-jour)
+- [Architecture](#architecture)
+- [Sécurité](#sécurité)
+- [La collecte](#la-collecte)
+- [Configuration : infra.yml](#configuration--infrayml)
+- [Inventaire Ansible et client](#inventaire-ansible-et-client)
+- [The Bastion](#the-bastion)
+- [Administration courante](#administration-courante)
+- [Développement](#développement)
+- [Dépannage](#dépannage)
+- [Documentation](#documentation)
+
+---
+
+## Ce que fait l'application
+
+La page s'ouvre sur quatre onglets. Les deux derniers ne sont visibles que des
+administrateurs.
+
+### Rentabilité (onglet par défaut)
+
+L'arbre du parc : **cluster → serveur → VM → éléments déclarés**. Chaque
+carte cumule ce qu'il y a en dessous.
+
+| Colonne | Ce qu'elle dit |
+|---|---|
+| PA / mois | ce que la carte coûte : le prix OVH **options comprises**, plus les achats saisis à la main |
+| CA / mois | ce qu'elle rapporte : les ventes saisies sur ses VM et ses éléments |
+| ROI / mois | CA − PA |
+| Marge | ROI / CA |
+| Capacité | `RAM 70 / 125 Go (56 %) · vCPU 23 / 24 (0,96×)` sur un serveur ou un cluster, `8 Go · 5 vCPU` sur une VM |
+
+Le bouton **Colonnes…** retire, ajoute et ordonne les colonnes. Le catalogue
+en compte vingt-cinq : Coût OVH, nombre de VM, RAM allouée et physique,
+vCPU, threads, rôle, offre, datacenter, nœud, client, contrat, corrections,
+alertes…
+
+Trois présentations :
+
+- **Arbre** : la hiérarchie, dépliable ;
+- **Tableau** : une ligne par carte d'un niveau, triable, exportable en CSV ;
+- **Graphiques** : un tableau de bord configurable (résultat par cluster,
+  origine du chiffre, capacité, clients, courbes dans le temps, projection de
+  capacité).
+
+Une présentation avec ses filtres et ses colonnes s'enregistre comme **vue**,
+privée ou partagée.
+
+**Ce qui se saisit** (rôle commercial) :
+
+- une vente sur une VM (contrat, client, prix) ;
+- des **enfants** sur une VM, un par un ou par lot (4 sites à 40 € sur un
+  serveur LAMP) ;
+- un rôle sur une carte (serveur web, LAMP, proxy, applicatif…), pris dans un
+  catalogue qui s'étend depuis la page ;
+- une correction d'un prix collecté, avec son motif.
+
+Chaque saisie entre dans un **journal chaîné** que personne ne peut réécrire
+sans que ça se voie (voir [Sécurité](#sécurité)).
+
+**L'historique et la projection.** La collecte inscrit chaque jour un point
+par carte : PA, CA, ROI, RAM et vCPU alloués et physiques. La projection
+trace la tendance de la RAM allouée sur 90 jours (moindres carrés) et donne la
+date à laquelle chaque cluster passera 85 % puis 100 % de sa RAM physique.
+Elle demande au moins 5 points étalés sur 14 jours et ne s'avance pas au-delà
+de 5 ans.
+
+### Schéma
+
+Le parc dessiné : **datacenter → serveur dédié → hyperviseur → invité**.
+
+- La carte d'un serveur affiche en gros son reverse, ou le nom du nœud
+  Proxmox s'il n'a pas de reverse personnalisé. Le nom OVH complet est
+  affiché dessous.
+- Un clic ouvre la fiche, avec le coût OVH détaillé (offre et options), les
+  saisies et l'état du jeton Proxmox.
+- La page propose des filtres (datacenter, cluster, type, état) et une
+  recherche (nom, IP, VMID, OS, étiquettes). Les totaux de l'en-tête suivent
+  les filtres.
+- Les positions, les replis et le zoom sont mémorisés par navigateur.
+
+### Jetons PVE (admins)
+
+Un tableau des hyperviseurs : cluster, état, jeton en service et son
+échéance, motif d'un refus ou d'une panne en clair. Le dépôt d'un jeton se
+fait ici, sans SSH :
+
+1. le formulaire donne les trois commandes `pveum` à lancer sur un nœud du
+   cluster, échéance comprise ;
+2. tu colles la valeur du jeton, telle quelle ou avec la ligne du tableau de
+   `pveum` autour ;
+3. le service la **scelle** aussitôt. À partir de là, il ne peut plus la
+   relire.
+
+La collecte suivante ouvre le dépôt, teste le jeton sur l'hyperviseur, puis le
+range chiffré ou le refuse avec son motif. Un jeton vaut pour tout son cluster.
+
+### Comptes (admins, mode comptes locaux)
+
+Créer un compte (identifiant, rôles), générer un nouveau mot de passe, changer
+les rôles, désactiver ou réactiver.
+
+- Le mot de passe généré ne s'affiche qu'une fois, et la personne le change à
+  sa première connexion.
+- Un admin ne peut ni se désactiver ni se retirer le rôle admin. Il reste
+  toujours au moins un admin actif.
+
+| Rôle | Ce qu'il permet |
+|---|---|
+| lecture | tout voir, rien saisir |
+| commercial | saisir ventes, enfants, rôles, corrections |
+| admin | en plus : jetons PVE, comptes, intégrité du journal, jeton Ansible |
+
+---
+
+## Démarrage rapide
+
+Cible : une VM **Debian 12** (MariaDB 10.11, Python 3.11, systemd 252),
+joignable en HTTPS, qui sort vers `api.ovh.com` et joint chaque hyperviseur
+sur le port 8006.
+
+```bash
+git clone https://github.com/Sazuro425/Inventory_OVH_Ansible.git
+cd Inventory_OVH_Ansible
+sudo bash deploy/preprod.sh --nom inventaire.exemple.lan
+```
+
+Le script monte tout, en une fois et sans jamais écrire de secret en clair :
+
+- les paquets ;
+- le code dans `/opt/inventaire-infra` ;
+- la base et ses deux comptes, avec des mots de passe tirés au hasard et
+  chiffrés aussitôt ;
+- le schéma et les migrations ;
+- la clé maîtresse et la boîte de dépôt des jetons ;
+- un certificat (auto-signé, ou le tien avec `--cert` et `--cle`) ;
+- Apache et le service web ;
+- le compte `admin`, dont le mot de passe s'affiche **une seule fois**.
+
+Ensuite :
+
+```bash
+cd /opt/inventaire-infra
+sudo bash deploy/poser-secret.sh ovh              # les trois clés OVH, testées avant d'être posées
+sudo systemctl start inventaire-collecte.service  # première collecte
+sudo systemctl enable --now inventaire-collecte.timer
+```
+
+Puis tu déposes un jeton Proxmox par cluster depuis l'onglet **Jetons PVE**,
+et tu relances une collecte.
+
+**La procédure complète, pas à pas, avec ce que tu dois voir à chaque étape
+et quoi faire sinon : [docs/preprod-pas-a-pas.md](docs/preprod-pas-a-pas.md).**
+
+### Les droits à donner aux clés OVH
+
+Sur <https://api.ovh.com/createToken/> (pas `eu.api.ovh.com`, dont le
+certificat est auto-signé), quatre lignes, **toutes en GET** :
+
+| Méthode | Chemin | Pour |
+|---|---|---|
+| GET | `/me` | vérifier la signature |
+| GET | `/dedicated/server*` | les dédiés, leur matériel |
+| GET | `/services*` | le prix de chaque serveur **et de ses options** |
+| GET | `/vps*` | les VPS |
+
+---
+
+## Mettre à jour
+
+```bash
+cd ~/Inventory_OVH_Ansible && git pull
+sudo bash deploy/preprod.sh --nom inventaire.exemple.lan
+```
+
+Le script est rejouable. Il réinstalle le code, applique les migrations de la
+base et rejoue les droits SQL. Il refait aussi la page avec le nouveau code, à
+partir du dernier relevé. Il ne touche à aucun secret, et un deuxième passage
+ne change aucun mot de passe.
+
+Ce qui demande une nouvelle collecte pour apparaître (de nouvelles données
+OVH ou Proxmox, comme le détail des options) apparaît à la collecte suivante,
+au plus une heure plus tard, ou tout de suite avec
+`sudo systemctl start inventaire-collecte.service`.
+
+---
+
+## Architecture
 
 ```
-API OVH  ──>  dédiés (reverse, offre, datacenter, expiration)
-   └──>  API Proxmox de chaque dédié  ──>  VM et LXC
-            └──>  MariaDB (un snapshot par collecte)
-                     └──>  inventaire dynamique Ansible
+                      ┌────────────────────── VM Debian ──────────────────────┐
+ API OVH ─────────┐   │                                                        │
+ (dédiés, prix,   ├──►│  collecte (timer horaire, compte système inventaire)   │
+  options)        │   │   infra_inventory.py ── secrets : systemd-creds        │
+ API Proxmox ─────┘   │          │  compte SQL « inventory »                   │
+ (8006, par cluster)  │          ▼                                             │
+                      │       MariaDB  ◄── compte SQL « inventory_web »        │
+                      │          │         (sans accès aux secrets)            │
+                      │          ▼                                             │
+                      │   serveur_web.py (127.0.0.1:8080) ◄── Apache (HTTPS) ◄─┼── navigateur
+                      │          │                                             │
+                      │          └── /api/inventaire ──────────────────────────┼── client Ansible
+                      └────────────────────────────────────────────────────────┘
 ```
 
-## Contenu
+**Deux processus, deux comptes de base, deux jeux de secrets.**
+
+| | Collecte | Service web |
+|---|---|---|
+| Lancée par | `inventaire-collecte.timer`, toutes les heures | `inventaire-web.service`, en permanence |
+| Exposée | non | oui, derrière Apache |
+| Compte SQL | `inventory` : lecture, écriture, schéma ; `DELETE` sur deux tables seulement | `inventory_web` : droits table par table, rien sur `secret_store` |
+| Secrets | clés OVH, mot de passe SQL, clé maîtresse | son mot de passe SQL, rien d'autre |
+
+Le service web est la partie joignable depuis le réseau. Il ne voit donc ni
+les clés OVH, ni les jetons Proxmox, ni la clé maîtresse. Compromis, il
+n'obtiendrait que les jetons déposés **après** la compromission.
+
+### Les fichiers
+
+**Collecte et données**
 
 | Fichier | Rôle |
 |---|---|
-| `ovh_inventory.py` | dédiés, VPS, Public Cloud, Hosted Private Cloud |
-| `proxmox_inventory.py` | VM et LXC d'un nœud PVE |
-| `infra_inventory.py` | orchestre les deux, sort l'inventaire Ansible |
-| `inventory_db.py` | couche MariaDB (snapshots) |
-| `setup_inventory_db.py` | crée la base, le compte et les tables |
-| `infra.yml` | configuration, sans aucun secret |
-| `sql/schema.sql` | tables et vues |
-| `sql/setup_db.sql` | variante SQL du setup, à lancer à la main |
-| `pinned/` | certificats des nœuds PVE, épinglés |
-| `exports/` | sorties CSV |
+| `infra_inventory.py` | orchestre la collecte, écrit le snapshot, sort l'inventaire Ansible |
+| `ovh_inventory.py` | API OVH : dédiés, VPS, prix et options (`/services`) |
+| `proxmox_inventory.py` | API Proxmox, épinglage des certificats |
+| `inventory_db.py` | façade de la couche base |
+| `db_base.py` | connexion, schéma, migrations, journal chaîné |
+| `db_snapshots.py` | snapshots, purge, historique |
+| `db_saisies.py` | ventes, éléments, rôles, corrections |
+| `db_vues.py` | vues enregistrées, tableaux de bord |
+| `rentabilite.py` | l'arbre de rentabilité et de capacité, l'export CSV |
+| `capacite.py` | historique et projection de capacité |
+| `generer_demo.py` | un parc fictif (adresses RFC 5737), pour éprouver la chaîne |
 
-Chaque script tourne aussi seul : `ovh_inventory.py` et `proxmox_inventory.py`
-ont leur propre ligne de commande et leurs sorties `table` / `csv` / `json`.
+**Service web et page**
 
-## Mise en route
-
-### 1. Accès OVH
-
-Créer un token sur <https://api.ovh.com/createToken/> avec au minimum
-`GET /dedicated/server*`, `GET /vps*` et `GET /services*` (le prix de
-chaque serveur, sans lequel la rentabilité n'a aucun coût), puis renseigner
-`~/.ovh.conf` :
-
-```ini
-[ovh-eu]
-application_key=...
-application_secret=...
-consumer_key=...
-```
-
-L'endpoint `ovh-eu` pointe sur `api.ovh.com` et non `eu.api.ovh.com`, qui sert
-un certificat auto-signé.
-
-### 2. Accès Proxmox
-
-Sur chaque nœud (ou un par cluster), un token en lecture seule :
-
-```bash
-pveum user add inventory@pve
-pveum aclmod / --user inventory@pve --role PVEAuditor
-pveum user token add inventory@pve readonly --privsep 0
-```
-
-`--privsep 0` est indispensable : sans lui le token n'hérite d'aucun droit et
-toutes les routes répondent 403. Le token se met dans `PVE_TOKEN`, ou par hôte
-dans la section `pve.tokens` de `infra.yml`.
-
-### 3. Certificats
-
-Proxmox signe ses certificats avec la CA interne du cluster, absente des
-magasins publics. Deux options, aucune ne désactive la vérification :
-
-- `pin_certs: true` (défaut) — le certificat de chaque nœud est épinglé dans
-  `pinned/` à la première connexion, puis toute substitution est refusée.
-  Vérifier l'empreinte sur le nœud avec `pvenode cert info`.
-- `ca_bundle` — la CA du cluster, rapatriée par
-  `python infra_inventory.py --collect-ca`.
-
-### 4. Base de données
-
-```bash
-python setup_inventory_db.py --db-password '<mot-de-passe>'
-export INVENTORY_DB_PASSWORD='<mot-de-passe>'
-```
-
-Le script est idempotent et ne supprime jamais de données. `--check` vérifie
-l'état sans rien écrire. `--client` passe par le client `mariadb` quand le
-compte administrateur utilise un plugin que PyMySQL ne gère pas — c'est le cas
-sur MariaDB Windows, dont le plugin par défaut est `gssapi` ; le compte
-applicatif est donc créé explicitement en `mysql_native_password`.
-
-**Création automatique** (`db.auto_schema: true`, par défaut) : si la base ou
-les tables manquent, les scripts les créent au premier passage. Cela suppose
-que le compte applicatif ait les droits de structure sur sa base :
-
-```sql
-GRANT CREATE, CREATE VIEW, DROP, INDEX, REFERENCES, ALTER
-  ON inventory.* TO 'inventory'@'localhost';
-```
-
-C'est un arbitrage : ces droits restent cantonnés à la base `inventory`, mais
-ils permettent au compte de supprimer ses propres tables. Si la collecte tourne
-sans surveillance sur un serveur partagé, préfère `auto_schema: false` et un
-setup fait par un administrateur — le compte n'a alors que les quatre verbes de
-manipulation de données.
-
-## Usage courant
-
-```bash
-# collecte et enregistrement d'un snapshot
-python infra_inventory.py --refresh --store-db
-
-# lecture humaine
-python infra_inventory.py --table
-
-# inventaire Ansible, lu en base, sans toucher aux API
-ansible-inventory -i infra_inventory.py --graph
-python infra_inventory.py --from-db --list
-```
-
-### Éprouver la chaîne sur un parc généré
-
-Avant de brancher la production, `generer_demo.py` fabrique un parc fictif et
-l'écrit en base. Tout l'aval fonctionne ensuite normalement dessus.
-
-```bash
-python generer_demo.py --store-db --acces exports/demo_acces.json
-python infra_inventory.py --from-db --table
-python topologie.py --bastion-acces exports/demo_acces.json
-python bastion_diff.py --acces exports/demo_acces.json
-```
-
-Le parc par défaut : 30 dédiés répartis en clusters et nœuds isolés, 4 à 16
-invités par nœud, avec des machines arrêtées, des Windows, des invités sans IP
-et quelques hyperviseurs injoignables. Le tirage est reproductible à `--seed`
-constant.
-
-**Les adresses sont prises dans les plages de documentation** — 198.51.100.0/24
-et 203.0.113.0/24 (RFC 5737) pour le public, 10.x pour le privé. Elles ne sont
-routables nulle part : un playbook lancé par erreur sur cet inventaire ne peut
-atteindre aucune machine réelle. Avec des IP OVH plausibles, il aurait pu taper
-chez quelqu'un d'autre. Le snapshot est également marqué « demo » dans
-`collect_run.message`.
-
-Mesures obtenues sur ce parc : 338 hôtes et 66 groupes dans l'inventaire
-Ansible (227 Ko, lu en moins d'une seconde), 378 cartes dans le schéma rendues
-en 16 ms, comparatif bastion en une seconde.
-
-**Ce que ce test ne couvre pas** : la déduplication de cluster. Les données
-générées sont déjà dans leur état d'après-déduplication — les invités y sont
-rattachés au représentant de leur cluster. L'algorithme lui-même n'est éprouvé
-que par le test sur données simulées, et ne le sera réellement qu'au premier
-passage sur un vrai parc en clusters.
-
-### Premier passage sur un parc complet
-
-Avant de lancer la collecte sur trente hyperviseurs, l'éprouver sur deux ou
-trois :
-
-```bash
-python infra_inventory.py --refresh --seulement 'ns1234*,ns5678*' --table
-```
-
-`--seulement` l'emporte sur `skip` et n'écrit rien en base tant que
-`--store-db` n'est pas passé. Ce qu'il faut regarder dans la sortie :
-
-- la ligne « N cluster(s) distinct(s), M hôte(s) membres d'un cluster déjà
-  couvert » — c'est la déduplication, et c'est le point qui n'a jamais été
-  éprouvé ailleurs que sur données simulées ;
-- les hôtes injoignables, qui sont souvent des dédiés non-hyperviseurs à
-  déclarer dans `skip` plutôt que de vrais problèmes.
-
-Un premier passage avec `--no-detail` va beaucoup plus vite : il saute
-l'interrogation de l'agent invité de chaque VM, donc deux appels par machine.
-De quoi valider la découverte avant de collecter les IP et les systèmes.
-
-En production, la collecte est planifiée à part (cron, timer systemd) et
-Ansible lit la base avec `--from-db` : aucune interrogation d'API pendant les
-playbooks.
-
-## Service web et client d'administration
-
-Le poste d'administration ne détient aucun accès aux API OVH ou Proxmox : il
-récupère l'inventaire déjà collecté auprès du service web, avec un jeton à
-usage unique pris sur la page après authentification.
-
-### Service
-
-```bash
-python serveur_web.py                   # écoute 127.0.0.1:8080
-python serveur_web.py --dev-user evan   # sans Apache devant, pour tester
-```
-
-| Route | |
+| Fichier | Rôle |
 |---|---|
-| `POST /api/token` | émet un jeton à usage unique (identité OIDC requise) |
-| `GET /api/inventaire` | rend l'inventaire Ansible, consomme le jeton |
-| `GET /api/sante` | état du service, sans authentification |
+| `serveur_web.py` | le service : routes déclarées par décorateur, contrôle d'accès, API |
+| `auth_locale.py` | comptes locaux : scrypt, sessions, blocage, gestion depuis l'onglet Comptes |
+| `topologie.py` | assemble la page et y injecte les données |
+| `csp.py` | politique de sécurité de la page, par empreintes SHA-256 |
+| `assets/page/` | sources de la page : `page.html`, `style.css`, `js/*.js` (un fichier par domaine) |
+| `assets/connexion.html` | la page de connexion |
 
-Il se place **derrière Apache**, qui porte l'authentification. Le vhost fourni
-contient déjà le nécessaire ; deux points y méritent attention.
+**Secrets**
 
-**Les deux routes n'ont pas la même politique.** `/api/token` exige l'OIDC :
-c'est un humain, dans un navigateur, qui demande un jeton. `/api/inventaire`
-en est volontairement exempte, parce que le client n'est pas un navigateur et
-ne peut pas suivre une redirection OIDC — c'est le jeton porté par
-`Authorization` que le service valide lui-même, et il ne sert qu'une fois.
-
-**L'en-tête d'identité est effacé avant d'être reposé.**
-
-```apache
-RequestHeader unset X-Remote-User        # partout
-<Location /api/token>
-    AuthType openid-connect
-    Require valid-user
-    RequestHeader set X-Remote-User %{REMOTE_USER}s
-</Location>
-```
-
-Sans le `unset`, n'importe qui enverrait cet en-tête et s'annoncerait comme
-l'administrateur de son choix. Il n'est reposé que là où l'authentification a
-réellement eu lieu. Et il n'est digne de confiance **que** parce que le service
-n'écoute que la boucle locale. Exposé sur `0.0.0.0`, n'importe qui pourrait le forger et
-s'émettre des jetons. Le mode `--dev-user` refuse d'ailleurs de démarrer sur
-une autre interface.
-
-Les jetons ne sont **jamais stockés en clair** : la base ne garde que leur
-empreinte SHA-256, l'émetteur, les dates d'émission et de consommation, et
-l'adresse qui les a utilisés. Une lecture de la base ne permet donc pas de s'en
-servir, et un jeton rejoué est refusé en indiquant la date du premier usage —
-ce qui distingue une erreur de manipulation d'une interception.
-
-La journalisation est nominative : le format `nominatif` du vhost emploie `%u`,
-qui reçoit l'identité OIDC via `OIDCRemoteUserClaim`. Sans cela les journaux ne
-contiennent que des adresses, ce qui ne dit pas grand-chose sur qui a consulté
-la cartographie.
-
-### Obtenir un jeton
-
-Le bouton **Jeton** de la page appelle `/api/token` sur la même origine — le
-cookie de session OIDC part avec la requête — et affiche la commande prête à
-coller :
-
-```
-infra update --token zEDsyJ9z_Ln4UmJLw-…
-```
-
-Validé de bout en bout : jeton pris dans la page, consommé par le client
-(338 hôtes récupérés), puis refusé au rejeu avec la date du premier usage. La
-base garde l'émetteur, les dates et l'adresse qui a consommé.
-
-Si la page est ouverte sans son service derrière — un fichier local, par
-exemple — le bouton le dit au lieu d'échouer en silence.
-
-### Client
-
-```bash
-infra update --token <jeton>    récupère l'inventaire et le met en cache
-infra list [motif]              ce que contient le cache
-infra list --groupes            les groupes disponibles
-infra simulate <playbook>       répétition à blanc (--check --diff)
-infra run <playbook>            simulation, confirmation, puis exécution
-```
-
-`run` enchaîne toujours une simulation d'abord, et **n'exécute rien si elle
-échoue**. La confirmation est demandée au clavier ; sans terminal, il faut
-`--oui` explicitement plutôt que de laisser passer silencieusement.
-
-Le cache signale l'âge de la **collecte**, pas celui du téléchargement : un
-inventaire récupéré il y a cinq minutes peut dater de la veille, et c'est cette
-ancienneté-là qui fait manquer des machines. Au-delà de `--ttl` heures, un
-avertissement s'affiche sans bloquer.
-
-L'inventaire est écrit pour Ansible au **format natif** (`all.hosts` pour les
-variables, `all.children` pour les groupes), et non au format de sortie d'un
-script d'inventaire. Passé tel quel à `-i`, ce dernier échoue : Ansible essaie
-de l'exécuter comme un script, puis de le lire en YAML, puis en INI. Le fichier
-est du JSON, qui est un sous-ensemble de YAML — le client n'a donc pas besoin
-de PyYAML.
-
-Validation faite avec Ansible 2.14 : `simulate` affiche les différences sans
-rien écrire (aucun fichier créé), `run` enchaîne `--check --diff` puis
-l'exécution réelle, et les fichiers apparaissent alors avec les droits
-attendus. Sans terminal et sans `--oui`, `run` s'arrête avant d'appliquer.
-
-Un playbook de validation est fourni dans `exemples/playbook_test.yml` : il
-tourne en `connection: local`, donc il n'a besoin d'aucune machine joignable.
-
-Sur `simulate` : `--check` d'Ansible ne déroule pas la résolution de paquets.
-Pour savoir ce qu'une mise à jour supprimerait, il faut une tâche de simulation
-du gestionnaire lui-même (`apt-get -s dist-upgrade`) — le client le rappelle à
-chaque lancement.
-
-## Accès par The Bastion
-
-Les connexions passent par [The Bastion](https://github.com/ovh/the-bastion)
-avec [the-bastion-ansible-wrapper](https://github.com/ovh/the-bastion-ansible-wrapper),
-qui remplace le client SSH d'Ansible.
-
-Dans le dépôt de playbooks :
-
-```bash
-git submodule add https://github.com/ovh/the-bastion-ansible-wrapper.git extra/bastion
-chmod +x extra/bastion/sshwrapper.py extra/bastion/sftpbastion.sh
-cp <ce-projet>/deploy/ansible.cfg.example ./ansible.cfg
-```
-
-Chaque opérateur déclare **son** compte :
-
-```bash
-export BASTION_USER=evan
-export BASTION_HOST=bastion.exemple.net
-export BASTION_PORT=22
-```
-
-### Pourquoi `bastion_user` n'est pas dans l'inventaire
-
-Le wrapper résout sa configuration dans cet ordre : `environment` du playbook,
-puis fichier de configuration, puis **inventaire**, puis variables
-d'environnement du système. L'inventaire passe donc **avant** l'environnement.
-
-Y écrire un `bastion_user` imposerait le même compte à tout le monde et
-réduirait à néant la traçabilité nominative du bastion : les enregistrements de
-session porteraient un compte générique au lieu de celui qui a agi. L'inventaire
-ne pose donc que `bastion_host` et `bastion_port`, communs à tous, et laisse
-chacun fournir son identité. Activer avec `ansible.bastion.actif: true` dans
-`infra.yml`.
-
-Les comptes **cibles** (sur les machines, pas sur le bastion) viennent de
-`ansible.comptes` : `root` sur les hyperviseurs, `ansible` sur les invités par
-défaut.
-
-### Comparatif inventaire / bastion
-
-Les deux listes divergent avec le temps, dans les deux sens, et chacune a son
-coût :
-
-- une machine du parc **sans accès déclaré** est injoignable — on s'en aperçoit
-  pendant une intervention, au pire moment ;
-- un accès qui **subsiste pour une machine disparue** est une entrée morte. Si
-  l'IP est réattribuée, l'accès suit la nouvelle machine.
-
-```bash
-bssh --osh selfListAccesses --json-greppable > acces.json
-python bastion_diff.py --acces acces.json
-```
-
-Ou directement, si le client bastion est sur le poste :
-
-```bash
-python bastion_diff.py
-```
-
-Le rapport liste les manquants, les orphelins, et donne les commandes
-`groupAddServer` / `groupDelServer` correspondantes.
-
-**En version graphique**, la même comparaison se superpose au schéma :
-
-```bash
-python topologie.py --bastion-acces acces.json
-```
-
-Les machines sans accès déclaré prennent un contour ambré et la mention
-« sans accès » ; les accès orphelins, qui ne correspondent à aucune machine,
-apparaissent dans une branche **ORPHELINS** à part — ils n'ont nulle part où se
-rattacher dans un arbre du parc. Un filtre *Bastion* permet de masquer ce qui
-va bien pour ne garder que la dérive, et une statistique « Sans accès » s'ajoute
-à l'en-tête.
-
-Sans `--bastion-acces`, aucune de ces marques n'apparaît : une page générée sans
-la couche d'accès ne laisse pas croire que tout est à déclarer. Il ne modifie rien : il
-constate et propose. Le code de sortie vaut 1 en cas de dérive, ce qui permet
-d'en faire un contrôle périodique.
-
-Deux précautions prises :
-
-- **Les plages sont comprises.** Un accès `10.10.20.0/24` couvre bien
-  `10.10.20.10` ; une comparaison par égalité de chaînes aurait déclaré tout le
-  parc manquant dès que tu déclares des sous-réseaux. Les jokers `*` et les
-  motifs sur le compte sont gérés de même.
-- **Une plage n'est orpheline que si plus aucune machine ne s'y trouve.** Sinon
-  chaque sous-réseau serait signalé à tort.
-
-**Trois états, pas deux.** Une machine qui n'a pas vocation à passer par le
-bastion n'est pas un oubli : la règle `bastion.hors_perimetre` d'`infra.yml` la
-classe « hors périmètre », comptée à part et jamais présentée comme un problème.
-Confondre « oublié » et « hors sujet » suffit à rendre le rapport illisible, et
-un rapport de dérive qu'on n'ouvre plus ne sert à rien.
-
-La règle accepte des motifs sur l'OS (`win*`), des étiquettes Proxmox
-(`no-bastion`) et des hôtes en dur. Le motif sur l'OS couvre les cas massifs
-sans rien saisir ; l'étiquette traite les exceptions que la règle manquerait.
-Le périmètre est évalué **avant** l'IP : une machine hors périmètre le reste,
-qu'on connaisse son adresse ou non.
-
-Les invités sans IP connue sont comptés à part : l'agent QEMU est absent ou la
-machine est arrêtée, donc leur accès ne peut être ni vérifié ni déclaré.
-
-La lecture de la réponse osh accepte `--json-greppable`, `--json` et un JSON
-nu. La structure exacte de `value` dépend de la version du bastion ; le parcours
-est volontairement tolérant, mais si rien n'est reconnu le message te demande
-la sortie réelle plutôt que de rendre un rapport faux.
-
-### Qui a le droit de passer
-
-Dans The Bastion, l'accès se porte par **groupe** : un groupe contient des
-serveurs, et des comptes en sont membres. Seuls ces membres peuvent atteindre
-ces serveurs. Déclarer trente hyperviseurs et leurs VM à la main invite à
-l'oubli, donc l'inventaire génère les commandes :
-
-```bash
-python infra_inventory.py --from-db --bastion-commands
-```
-
-Ce qui produit, à jouer depuis ton compte bastion :
-
-```
-bssh --osh groupAddServer --group infra-prod --host 151.80.18.180 --user root --port 22 --comment 'ns375008'
-bssh --osh groupAddServer --group infra-prod --host 10.10.20.10 --user ansible --port 22 --comment 'atmons (106)'
-```
-
-Le groupe se crée une fois (`groupCreate`), et c'est `groupAddMember` qui décide
-qui peut passer — ce qui reste une décision humaine, volontairement hors du
-script. Les invités sans IP connue sont comptés et signalés plutôt qu'ignorés
-en silence.
-
-Relancer la commande après une collecte donne l'état à jour ; `groupDelServer`
-retire ce qui a disparu.
-
-## Schéma de l'infrastructure
-
-`topologie.py` produit une vue en arbre, façon topologie réseau :
-**datacenter → serveur dédié → hyperviseur → invité**.
-
-```bash
-python topologie.py                       # depuis le dernier snapshot en base
-python topologie.py --refresh             # collecte d'abord
-python topologie.py --out /var/www/html/infra.html
-```
-
-La page est **autonome et interactive** : aucune dépendance, aucun CDN, aucun
-appel réseau au rendu. Elle peut donc être servie telle quelle depuis un
-serveur web, ou ouverte en local.
-
-| Interaction | |
+| Fichier | Rôle |
 |---|---|
-| Glisser une carte | la déplace ; elle garde sa place |
-| Glisser le fond | déplace la vue |
-| Molette | zoom centré sur le pointeur |
-| Clic sur une carte | fiche de détails complète |
-| Bouton `–` / `+n` | replie ou déplie une branche |
-| Filtres | datacenter, cluster, type, état |
-| Recherche (`/`) | nom, IP, VMID, OS, étiquettes |
-| Ajuster / Réinitialiser | recadre, ou remet tout à zéro |
-| ◐ | thème sombre (défaut) ou clair |
+| `secrets_infra.py` | lit un secret : systemd-creds d'abord, l'environnement ensuite |
+| `secret_store.py` | secrets chiffrés en base (AES-GCM, clé maîtresse) |
+| `depot_scelle.py` | boîte de dépôt des jetons PVE (X25519, HKDF-SHA256, AES-GCM) |
+| `inventory_cli.py` | administration : clé maîtresse, migrations, comptes, dépôts, journal |
 
-Déplacements, replis, filtres, zoom et thème sont mémorisés dans le navigateur
-(`localStorage`), par visiteur : la page peut être servie à plusieurs personnes,
-chacune garde sa disposition. Le bouton Réinitialiser efface tout.
+**Base**
 
-Chaque carte porte le matériel utile à ce niveau, et la bande de couleur donne
-l'état (vert en marche, gris arrêté, rouge injoignable).
+| Fichier | Rôle |
+|---|---|
+| `sql/schema.sql` | le schéma, version 1 |
+| `sql/migrations/NNNN_*.sql` | les versions suivantes (0002 à 0006), appliquées une fois, dans l'ordre |
+| `sql/droits.sql` | les droits des deux comptes, rejoués à chaque mise à jour |
+| `sql/setup_db.sql`, `sql/setup_db_web.sql` | création manuelle des comptes |
 
-**Les totaux de l'en-tête suivent les filtres.** Filtrer sur un datacenter
-donne immédiatement ce qu'il représente :
+**Déploiement**
 
-```
-10 / 30 DÉDIÉS   113 / 308 INVITÉS   420 / 1 135 vCPU   750 Go / 1 902 Go RAM
-```
+| Fichier | Rôle |
+|---|---|
+| `deploy/preprod.sh` | installation complète et mise à jour |
+| `deploy/poser-secret.sh` | pose les clés OVH ou un jeton PVE, chiffrés |
+| `deploy/inventory.sh` | lance `inventory_cli.py` sous le compte de collecte, avec ses secrets |
+| `deploy/installer.sh` | installe le code et les unités (appelé par `preprod.sh`) |
+| `deploy/collecte.sh` | ce que lance le timer : dépôts, collecte, page |
+| `deploy/inventaire-*.service`, `.timer` | unités systemd, durcies |
+| `deploy/apache-inventaire-local.conf` | vhost en mode comptes locaux |
+| `deploy/apache-inventaire.conf` | vhost en mode OIDC (Authentik) |
 
-Le total d'origine reste affiché à côté, les cartes prennent une bordure
-d'accent et le sous-titre indique « vue filtrée » : sans cela, on croirait
-regarder tout le parc. C'est ce qui permet de répondre à « combien de vCPU pour
-le client ABC » ou « combien de RAM engagée à rbx6 » sans requête SQL.
+**Ansible et bastion**
 
-Le **pliage n'entre pas dans le calcul** : replier une branche est un confort
-d'affichage, pas un filtre. Les totaux ne bougent donc pas quand on ouvre ou
-ferme un hyperviseur, ce qui serait déroutant.
+| Fichier | Rôle |
+|---|---|
+| `client/infra.py` | le client du poste d'administration : `update`, `list`, `simulate`, `run` |
+| `bastion_diff.py` | comparatif inventaire / accès The Bastion |
+| `deploy/ansible.cfg.example` | Ansible derrière the-bastion-ansible-wrapper |
 
-**À l'échelle** : mesuré à 423 cartes (30 hyperviseurs, 12 invités chacun), le
-rendu prend 21 ms. Au-delà de 60 invités, la page s'ouvre repliée au niveau des
-hyperviseurs, sinon elle ferait plusieurs milliers de pixels de haut ; et
-l'ajustement ne descend jamais sous un zoom lisible.
+### Les routes du service
 
-Les sources de la page sont dans `assets/page/` : le squelette `page.html`,
-`style.css`, et un fichier JavaScript par domaine dans `js/` (carte,
-rentabilité, tableau, graphiques, filtres et vues, saisies, récolte…).
-`topologie.py` les assemble en une page unique, autonome, et n'y injecte que
-les données. Pour changer l'allure ou le comportement, ce sont ces sources
-qu'il faut modifier, pas le script Python.
+| Accès | Routes |
+|---|---|
+| public | `GET /api/sante`, `GET /connexion`, `POST /api/connexion`, `GET /api/inventaire` (jeton à usage unique) |
+| lecture | `GET /api/rentabilite`, `/api/export.csv`, `/api/vues`, `/api/historique`, `/api/projection`, `/api/journal` |
+| commercial | `POST /api/commercial`, `/api/element(s)`, `/api/role(s)`, `/api/surcharge`… |
+| admin | `/api/recolte`, `/api/recolte/jeton`, `/api/comptes*`, `/api/journal/integrite` |
+| jeton | `POST /api/token` : admin dès qu'un admin est déclaré (toujours en mode local), lecture sinon |
 
-La page porte sa propre politique de sécurité (balise `<meta>`) : son script
-et son style sont autorisés par leur empreinte SHA-256 (`csp.py`), sans
-`'unsafe-inline'`.
+Une seule fonction d'aiguillage applique dans l'ordre : le mode
+d'authentification, la même origine pour tout `POST`, le rôle, puis un corps
+JSON borné.
 
-Régénérer le schéma après chaque collecte suffit à le garder à jour ; ajoute la
-commande à la fin de `deploy/collecte.sh` pour qu'il se rafraîchisse tout seul.
+---
 
-## Collecte planifiée
+## Sécurité
 
-La collecte tourne à part et alimente la base ; Ansible lit ensuite la base
-avec `--from-db`, sans jamais interroger les API pendant un playbook.
+Conçu pour tenir une revue NIS 2 sur ce qui est du ressort de l'application.
 
-Les secrets vivent dans un fichier d'environnement, jamais dans la définition
-de la tâche ni sur la ligne de commande — un `ps aux` ou un `systemctl show`
-les exposerait.
+**Secrets.**
 
-### Sur la VM Linux : l'installeur
+- Aucun secret n'est écrit en clair, ni sur le disque, ni dans un argument de
+  commande.
+- Les mots de passe SQL, les clés OVH et la clé maîtresse sont chiffrés par
+  `systemd-creds`. Ils sont liés à la VM, et au TPM s'il y en a un.
+- systemd les dépose dans un tmpfs que seul le service concerné lit. Ils
+  n'entrent jamais dans l'environnement d'un processus.
+- Les jetons Proxmox sont chiffrés en base sous la clé maîtresse.
+- `infra.yml` ne contient que des références (`env:NOM`, `cred:nom`,
+  `db:nom`).
 
-```bash
-sudo ./deploy/installer.sh --simulation    # montre ce qui serait fait
-sudo ./deploy/installer.sh                 # installe
-```
+**Boîte de dépôt scellée.**
 
-Il crée le compte de service, dépose le code dans `/opt/inventaire-infra`,
-installe les unités systemd et le vhost Apache, prépare `/var/www/inventaire`,
-puis affiche ce qu'il reste à faire à la main.
+- Le service web scelle un jeton Proxmox avec une clé **publique**, dès la
+  réception : X25519, HKDF-SHA256, AES-GCM, avec l'hôte comme donnée
+  associée.
+- Seule la collecte détient la clé privée.
+- Un service web compromis ne relit donc aucun dépôt antérieur.
 
-Il est **idempotent** — on le rejoue pour mettre à jour le code — et il ne
-remplace jamais un fichier déjà renseigné : ni `/etc/inventaire-infra.env`, ni
-`infra.yml`, ni les certificats épinglés. Ce qu'il remplace, il le sauvegarde
-d'abord avec un horodatage.
+**Comptes locaux** (en attendant l'OIDC) :
 
-Il ne touche pas à la base : le schéma se crée au premier passage de la
-collecte, et le compte applicatif par `setup_inventory_db.py`, qui demande les
-accès administrateur.
+- **Mots de passe :** stockés en scrypt salé, 12 caractères au moins, sans
+  l'identifiant.
+- **Blocage :** 5 échecs bloquent le compte 15 minutes, et un identifiant
+  inconnu coûte le même temps de calcul qu'un vrai.
+- **Session :** cookie `__Host-` en `Secure`, `HttpOnly` et `SameSite=Strict`.
+  La base n'en garde que l'empreinte. La session expire au bout d'une heure
+  d'inactivité, et de huit heures au plus.
+- **Premier mot de passe :** un mot de passe généré est à changer à la
+  première connexion. D'ici là, le compte n'a aucun rôle.
 
-Options : `--sans-apache`, `--sans-web`, `--sans-timer`, `--prefixe <chemin>`.
+**Journal chaîné.**
 
-**Fins de ligne** : les scripts doivent être en LF. Un `#!/usr/bin/env bash`
-donne `$'': command not found`, et une unité systemd en CRLF se comporte mal.
-Le `.gitattributes` impose `eol=lf` ; attention si tu édites depuis Windows,
-car l'écriture de fichiers texte y ajoute des CRLF par défaut.
+- Chaque saisie, connexion, changement de compte ou dépôt entre au journal
+  avec l'empreinte SHA-256 de la ligne précédente.
+- La collecte recopie la tête de chaîne dans le journal système à chaque
+  passage.
+- `deploy/inventory.sh --verifier-journal` dit si la chaîne est intacte.
 
-Contrôle :
+**Certificats Proxmox.**
 
-```bash
-systemctl list-timers inventaire-collecte.timer
-sudo systemctl start inventaire-collecte.service   # collecte immédiate
-journalctl -u inventaire-collecte -n 30
-```
+- Le certificat de chaque nœud est épinglé au premier contact (`pinned/`).
+  Ensuite, seul ce certificat est accepté : il sert d'ancre unique, et urllib3
+  compare en plus son empreinte SHA-256.
+- Le nom d'hôte n'est pas comparé. Proxmox émet son certificat au nom du nœud
+  (`pve-13`), pas au nom OVH par lequel on le joint, et l'épinglage prouve
+  déjà l'identité.
+- Rien n'est désactivé. `tests_pve_tls.py` le vérifie contre un vrai serveur
+  TLS.
 
-Le service est en `Type=oneshot` et durci (`ProtectSystem=strict`,
-`NoNewPrivileges`, `PrivateTmp`). Le timer est horaire avec
-`RandomizedDelaySec=5min`, pour que trente interrogations d'API ne partent pas
-toutes à l'heure ronde, et `Persistent=true` pour rattraper un passage manqué.
-`collecte.sh` prend un verrou `flock` : une collecte qui traîne n'en croise
-jamais une autre.
+**La page.**
 
-### Sur Windows (tâche planifiée)
+- CSP par empreintes SHA-256, sans `'unsafe-inline'`.
+- `X-Frame-Options`, `no-store`.
+- Le service n'écoute que `127.0.0.1`. Apache termine le TLS et efface tout
+  en-tête d'identité venu du client.
 
-```powershell
-copy deploy\inventaire.env.example $env:USERPROFILE\.inventaire-infra.env
-notepad $env:USERPROFILE\.inventaire-infra.env    # renseigner les secrets
-.\deploy\planifier.ps1 -Minutes 60
-```
+**Base.** Le compte du service web n'atteint pas `secret_store`, et n'a
+`DELETE` nulle part. Un compte se désactive, il ne s'efface pas. Le compte de
+collecte n'a `DELETE` que sur `collect_run` (purge des vieux snapshots) et
+`client_token`.
 
-Pas besoin de droits administrateur : la tâche est enregistrée pour
-l'utilisateur courant. `planifier.ps1 -Supprimer` la retire.
+**Ce qui reste à faire.** Le MFA viendra avec l'OIDC (Authentik), déjà prévu
+par `web.auth: oidc` et `deploy/apache-inventaire.conf`. En attendant, une
+restriction réseau dans le vhost (`Require ip`, en commentaire) est la
+protection la moins chère à ajouter.
 
-```powershell
-Start-ScheduledTask -TaskName 'Inventaire OVH-Proxmox'
-Get-ScheduledTaskInfo -TaskName 'Inventaire OVH-Proxmox'
-Get-Content "$env:USERPROFILE\.inventaire-infra.log" -Tail 20
-```
+---
 
-Deux pièges rencontrés, déjà corrigés dans les scripts : la tâche doit lancer
-`pwsh.exe` quand il est présent, et `$ErrorActionPreference = 'Stop'` transforme
-chaque ligne que Python écrit sur stderr en exception fatale — d'où un retour
-en `Continue` le temps de l'appel.
+## La collecte
 
-### Hébergement de la page
+Lancée par `inventaire-collecte.timer` toutes les heures, avec 5 minutes de
+décalage aléatoire, et rattrapée au démarrage si la VM était éteinte.
+`deploy/collecte.sh` enchaîne :
 
-La page est un fichier statique : n'importe quel serveur web suffit. Les deux
-configurations sont fournies, `deploy/apache-inventaire.conf` et
-`deploy/nginx-inventaire.conf`.
+1. **les dépôts de jetons** : ouverts, testés sur l'hyperviseur, rangés ou
+   refusés avec leur motif ;
+2. **OVH** : la liste des dédiés et leur matériel facturé. Le prix vient de
+   `/services/{id}`, et **les options** (RAM ou disques ajoutés, IP, bande
+   passante, licences) de `/services/{id}/options`. Chaque option est
+   ramenée au mois, puisqu'un engagement annuel est divisé par 12. Le PA
+   d'un serveur est le total facturé ;
+3. **Proxmox** : le matériel vu par l'hyperviseur, les VM et LXC, leur
+   agent invité (IP, OS). **Un seul nœud est interrogé par cluster**, puisque
+   `/cluster/resources` rend déjà tout le cluster ;
+4. **la base** : un snapshot, la purge des anciens (`db.keep_runs`), le point
+   du jour de l'historique, l'ancre du journal ;
+5. **la page**, réécrite de façon atomique : un visiteur ne voit jamais une
+   page tronquée.
 
-```bash
-sudo mkdir -p /var/www/inventaire
-sudo chown inventaire:www-data /var/www/inventaire
-sudo chmod 750 /var/www/inventaire
-```
+Un hyperviseur injoignable, ou un droit manquant sur une route, n'arrête pas
+la collecte : l'hôte passe « injoignable », avec son motif. Une clé OVH
+invalide l'arrête, et systemd voit l'échec.
 
-**Apache**
+Les deux reverses OVH se valent mal :
 
-```bash
-sudo a2enmod headers
-sudo cp deploy/apache-inventaire.conf /etc/apache2/sites-available/inventaire.conf
-sudo htpasswd -c /etc/apache2/.htpasswd-inventaire evan
-sudo a2ensite inventaire
-sudo apache2ctl configtest && sudo systemctl reload apache2
-```
-
-**nginx**
-
-```bash
-sudo cp deploy/nginx-inventaire.conf /etc/nginx/sites-available/inventaire
-sudo ln -s /etc/nginx/sites-available/inventaire /etc/nginx/sites-enabled/
-sudo htpasswd -c /etc/nginx/.htpasswd-inventaire evan
-sudo nginx -t && sudo systemctl reload nginx
-```
-
-### Authentification par Authentik (OIDC)
-
-L'authentification basic est le point de départ ; pour brancher Authentik,
-Apache passe par `mod_auth_openidc`.
+- un reverse personnalisé (`pve01-si.exemple.bzh`) sert tel quel, débarrassé
+  de son point final DNS ;
+- sans reverse, OVH rend `nsXXXX.ip-a-b-c.eu`. La carte prend alors le nom du
+  nœud Proxmox dès que son jeton passe.
 
 ```bash
-sudo apt install libapache2-mod-auth-openidc
-sudo a2enmod auth_openidc
-sudo mkdir -p /etc/apache2/conf-secrets
-sudo cp deploy/inventaire-oidc.conf.example         /etc/apache2/conf-secrets/inventaire-oidc.conf
-sudo chown root:www-data /etc/apache2/conf-secrets/inventaire-oidc.conf
-sudo chmod 640 /etc/apache2/conf-secrets/inventaire-oidc.conf
+sudo systemctl start inventaire-collecte.service                     # tout de suite
+journalctl -u inventaire-collecte.service -n 40 --no-pager -o cat    # ce qu'elle a fait
+systemctl list-timers inventaire-collecte.timer                      # le prochain passage
 ```
 
-Côté Authentik : un **Provider OAuth2/OpenID** en client confidentiel, avec
-comme Redirect URI exactement l'`OIDCRedirectURI` du fichier
-(`https://…/oidc-callback`), puis une **Application** dont le slug sert dans
-l'URL des métadonnées
-(`/application/o/<slug>/.well-known/openid-configuration`).
+---
 
-Reste à remplir `OIDCClientID`, `OIDCClientSecret` et une `OIDCCryptoPassphrase`
-(`openssl rand -base64 32`), puis à remplacer dans le vhost le bloc `AuthType
-Basic` par :
+## Configuration : infra.yml
 
-```apache
-AuthType openid-connect
-Require valid-user
-```
+Installé une fois dans `/opt/inventaire-infra/infra.yml`, puis jamais écrasé.
+**Aucun secret**, seulement des références.
 
-Pour restreindre à un groupe plutôt qu'à tout compte Authentik, ajouter le
-scope `groups` au provider et utiliser `Require claim groups:infra-admins`.
+| Clé | Rôle |
+|---|---|
+| `ovh.endpoint` | `ovh-eu` (pointe sur `api.ovh.com`) |
+| `pve.pin_certs` | épingle le certificat de chaque nœud (défaut : oui) |
+| `pve.jetons_deposes` | un jeton déposé depuis la page sert sans autre réglage |
+| `pve.tokens` | un jeton nommé pour un hôte précis, prioritaire |
+| `pve.skip` | dédiés qui ne sont pas des hyperviseurs (ESXi, sauvegarde…) : ni sondés, ni comptés injoignables |
+| `pve.seulement` | motifs glob pour éprouver la collecte sur une partie du parc |
+| `pve.detail` | interroge l'agent invité de chaque VM (IP, OS) ; `false` va plus vite |
+| `db.auto_schema` | applique les migrations au passage de la collecte |
+| `db.keep_runs` | nombre de snapshots gardés (200) |
+| `web.auth` | `local` (comptes de l'onglet Comptes) ou `oidc` (Authentik par Apache) |
+| `ansible.comptes` | comptes cibles : `root` sur les hyperviseurs, `ansible` sur les invités |
+| `ansible.bastion` | hôte, port et groupe The Bastion ; règles « hors périmètre » |
 
-Trois points qui coûtent du temps si on les découvre en route :
+---
 
-- **HTTPS est obligatoire en pratique.** Les cookies de session du module sont
-  posés en `Secure`, et Authentik refuse une `redirect_uri` en clair hors
-  localhost. Passe par certbot ou une CA interne avant d'activer l'OIDC.
-- **L'URL de callback ne doit correspondre à aucun fichier.** Apache
-  l'intercepte au moment de l'authentification ; c'est normal qu'elle n'existe
-  pas sur le disque.
-- **Le secret client reste hors du dépôt.** Le vhost l'inclut par
-  `IncludeOptional`, donc Apache démarre même sans le fichier — on retombe
-  simplement sur l'authentification basic.
+## Inventaire Ansible et client
 
-Alternative si tu préfères ne rien configurer dans Apache : Authentik sait aussi
-faire *Proxy Provider* en forward auth, la page restant servie en local sans
-authentification propre. L'OIDC a l'avantage de rester indépendant d'un
-reverse proxy devant.
-
-La publication est déclenchée par la collecte elle-même : le service définit
-`INVENTAIRE_WEB=/var/www/inventaire/index.html`, et `collecte.sh` régénère la
-page juste après avoir écrit le snapshot. Commente cette variable pour ne rien
-publier.
-
-Trois points de conception :
-
-- **Écriture atomique.** La page est écrite à côté puis renommée. Un visiteur
-  qui charge la page pendant une collecte voit l'ancienne version ou la
-  nouvelle, jamais une page tronquée.
-- **Un échec de publication ne fait pas échouer la collecte.** Les données sont
-  en base, c'est ce qui compte ; le journal signale la page non régénérée.
-- **La page n'est pas publique.** Elle cartographie ton infrastructure :
-  serveurs, IP, VM, systèmes. La configuration fournie impose une
-  authentification, et contient en commentaire une restriction par adresse IP,
-  plus solide qu'un mot de passe si tes clients sont sur un réseau connu.
-
-La page ne fait aucun appel réseau, ce qui permet une CSP stricte
-(`default-src 'none'`). Le cache est désactivé sur `index.html`, sinon un
-navigateur servirait un inventaire périmé sans prévenir.
-
-### Secrets chiffrés (systemd-creds)
-
-Un fichier d'environnement a deux défauts : il est lisible en clair par root et
-par toute sauvegarde du système, et surtout les secrets finissent dans
-**l'environnement du processus** — donc dans `/proc/<pid>/environ` et dans un
-éventuel vidage mémoire.
+La collecte remplit la base. Ansible lit la base, sans jamais appeler une API
+pendant un playbook.
 
 ```bash
-sudo ./deploy/chiffrer-secrets.sh
+python3 infra_inventory.py --from-db --list      # l'inventaire, lu en base
+ansible-inventory -i infra_inventory.py --graph  # vu par Ansible
+python3 infra_inventory.py --from-db --table     # lecture humaine
 ```
 
-Le script lit `/etc/inventaire-infra.env`, chiffre chaque variable séparément
-dans `/etc/inventaire-infra/creds/`, et déplace l'original en `.avant-chiffrement`
-plutôt que de le supprimer — le temps de vérifier que les services démarrent.
+**Le poste d'administration ne détient aucun accès aux API.**
 
-Il reste à activer le chargement dans les unités : commenter `EnvironmentFile=`
-et décommenter les lignes `LoadCredentialEncrypted=`, déjà présentes.
+1. Un admin clique **Jeton** dans la page et obtient une commande prête à
+   coller.
+2. Le client récupère l'inventaire avec ce jeton, qui ne sert qu'une fois. La
+   base ne garde que son empreinte, et un rejeu est refusé avec la date du
+   premier usage.
 
-systemd dépose alors les secrets dans un tmpfs que **seul ce service** peut
-lire. Les scripts les y cherchent avant l'environnement, qui reste accepté en
-repli pour les lancements manuels.
+```bash
+infra update --token <jeton>    # récupère l'inventaire et le met en cache
+infra list [motif]              # ce que contient le cache ; --groupes pour les groupes
+infra simulate <playbook>       # --check --diff, n'écrit rien
+infra run <playbook>            # simulation, confirmation, puis exécution
+```
 
-Avec un TPM, la clé ne quitte pas la puce et les fichiers chiffrés sont
-inutilisables sur une autre machine ; sans TPM, systemd se rabat sur une clé
-hôte dans `/var/lib/systemd/`. Dans les deux cas, ce qui change réellement :
-une sauvegarde, un snapshot ou un disque récupéré ne contiennent plus rien
-d'exploitable. Contre un attaquant déjà root sur la machine, rien ne protège —
-le service doit bien obtenir le secret en clair à un moment.
+`run` simule toujours d'abord, et n'exécute rien si la simulation échoue.
+Sans terminal, il faut `--oui`. Le cache signale l'âge de la **collecte**, pas
+celui du téléchargement. Un playbook de test sans machine joignable :
+`exemples/playbook_test.yml`.
 
-Dans `infra.yml`, les références acceptent les deux formes : `env:NOM` pour une
-variable, `cred:nom` pour un secret systemd.
-
-### Rétention
-
-`db.keep_runs` dans `infra.yml` (200 par défaut) limite le nombre de snapshots
-conservés ; la purge s'exécute à la fin de chaque collecte et les suppressions
-suivent les clés étrangères en cascade.
-
-## Groupes Ansible générés
+### Groupes générés
 
 `pve_nodes`, `pve_guests`, `type_qemu` / `type_lxc`, `status_running` /
 `status_stopped`, `cluster_<nom>`, `node_<nom>`, `dc_<datacenter>`,
-`tag_<tag>` (depuis les tags Proxmox), plus deux groupes de contrôle :
-`guests_sans_ip` (agent invité absent) et `pve_unreachable` (dédié qui ne
-répond pas sur 8006 — en panne, ou pas un hyperviseur, à mettre dans
-`pve.skip`).
+`tag_<tag>` (étiquettes Proxmox), plus deux groupes de contrôle :
+`guests_sans_ip` (agent invité absent) et `pve_unreachable`.
 
-### Variables matérielles
+### Variables
 
 Les hyperviseurs portent deux jeux de variables, volontairement séparés :
 
-- `ovh_*` — ce qu'OVH facture : `ovh_cpu_model`, `ovh_cpu_cores`,
-  `ovh_cpu_threads`, `ovh_ram_mb`, `ovh_disk_count`, `ovh_disks`
-- `hw_*` — ce que l'hyperviseur voit vraiment : `hw_cpu_model`,
-  `hw_cpu_sockets`, `hw_cpu_cores`, `hw_cpu_logical`, `hw_cpu_mhz`,
-  `hw_ram_total_mb`, `hw_ram_used_mb`, `hw_disk_count`, `hw_disk_total_gb`,
-  `hw_disk_desc`, `hw_pve_version`, `hw_kernel`
+- `ovh_*` : ce qu'OVH facture (`ovh_cpu_model`, `ovh_ram_mb`, `ovh_disks`…) ;
+- `hw_*` : ce que l'hyperviseur voit vraiment (`hw_cpu_logical`,
+  `hw_ram_total_mb`, `hw_pve_version`, `hw_kernel`…).
 
-Les deux ne coïncident jamais tout à fait (RAM réservée par le firmware,
-capacité disque annoncée en Go décimaux) et l'écart est en soi une information :
-une divergence franche signale un remplacement de pièce ou une barrette morte.
+Un écart franc entre les deux signale une pièce remplacée ou une barrette
+morte. Les VM portent leurs variables `pve_*` et les `ovh_*` de leur serveur,
+ce qui permet de cibler toutes les VM d'un datacenter, ou d'un dédié qui
+arrive à échéance.
 
-Les VM reçoivent `host_cpu_model`, `host_cpu_cores` et `host_disks`, le
-matériel de la machine physique qui les porte.
+---
 
-Chaque VM porte ses variables `pve_*` **et** les `ovh_*` du serveur qui
-l'héberge : c'est ce croisement qui permet de cibler, par exemple, toutes les
-VM d'un datacenter ou d'un dédié qui arrive à expiration.
+## The Bastion
 
-## Points d'attention
+Les connexions Ansible passent par [The Bastion](https://github.com/ovh/the-bastion)
+avec [the-bastion-ansible-wrapper](https://github.com/ovh/the-bastion-ansible-wrapper).
+`deploy/ansible.cfg.example` le branche. Chaque opérateur déclare **son**
+compte (`BASTION_USER`) : `bastion_user` n'est volontairement jamais dans
+l'inventaire. Le wrapper donne la priorité à l'inventaire sur
+l'environnement, si bien qu'un compte écrit dans l'inventaire s'imposerait à
+tout le monde et effacerait la traçabilité nominative.
 
-- **Cache** : Ansible relance l'inventaire à chaque playbook. Le cache
-  (`cache.ttl`, 900 s) et le mode `--from-db` évitent de refaire le tour des
-  API à chaque commande.
-- **Clusters** : les membres d'un même cluster ne sont interrogés qu'une fois,
-  `/cluster/resources` renvoyant déjà tout le cluster.
-- **Secrets** : `infra.yml` ne contient aucun mot de passe, uniquement des
-  références `env:NOM`.
-- **Tolérance** : un nœud injoignable ou un droit manquant sur une route
-  n'interrompt pas la collecte ; des identifiants invalides, si.
+```bash
+python3 infra_inventory.py --from-db --bastion-commands   # les groupAddServer à jouer
+bssh --osh selfListAccesses --json-greppable > acces.json
+python3 bastion_diff.py --acces acces.json                # manquants, orphelins, commandes
+python3 topologie.py --bastion-acces acces.json           # la même chose sur le schéma
+```
+
+Le comparatif comprend les plages (`10.10.20.0/24` couvre `10.10.20.10`). Il
+distingue trois états, et pas deux : « déclaré », « manquant », et « hors
+périmètre ». Ce dernier vient de la règle `ansible.bastion.hors_perimetre` :
+`win*`, l'étiquette `no-bastion`, ou des hôtes en dur. Son code de sortie vaut
+1 en cas de dérive, ce qui en fait un contrôle périodique.
+
+---
+
+## Administration courante
+
+Sur la VM, en root, depuis `/opt/inventaire-infra`. `deploy/inventory.sh`
+lance `inventory_cli.py` sous le compte de collecte, avec ses secrets
+chiffrés : un shell ordinaire ne peut pas les lire, et c'est voulu.
+
+| Besoin | Commande |
+|---|---|
+| Changer les clés OVH | `bash deploy/poser-secret.sh ovh` |
+| Tester les clés OVH en place | `bash deploy/inventory.sh --tester-ovh` |
+| Plus aucun admin ne peut se connecter | `bash deploy/inventory.sh --compte-local admin` |
+| Vérifier le journal des saisies | `bash deploy/inventory.sh --verifier-journal` |
+| Appliquer les migrations à la main | `bash deploy/inventory.sh --migrer` |
+| État des secrets en base | `bash deploy/inventory.sh --list` |
+| Collecte immédiate | `systemctl start inventaire-collecte.service` |
+| Santé du service | `curl -s http://127.0.0.1:8080/api/sante` |
+
+Les comptes de tous les jours se gèrent depuis l'onglet **Comptes**.
+
+**À ne jamais faire :**
+
+- supprimer `/etc/inventaire-infra/creds/master_key.cred` : les jetons en base
+  deviendraient définitivement illisibles ;
+- copier les fichiers `.cred` sur une autre machine : ils sont liés à cette
+  VM ;
+- modifier à la main les `10-secrets.conf` des unités : ils sont régénérés
+  par `poser-secret.sh`.
+
+---
+
+## Développement
+
+### La page
+
+Ses sources sont dans `assets/page/` : `page.html`, `style.css` et un fichier
+JavaScript par domaine dans `js/`.
+
+| Fichier | Domaine |
+|---|---|
+| `01-carte.js` | le schéma |
+| `02-rentabilite.js` | l'arbre |
+| `03-tableau.js` | le tableau et le catalogue de colonnes |
+| `04*-*.js` | les graphiques, les panneaux, l'historique |
+| `05-filtres-vues.js` | les filtres et les vues |
+| `06-saisies.js` | les saisies |
+| `09-recolte.js` | les jetons |
+| `09b-onglets.js` | les onglets |
+| `09c-comptes.js` | les comptes |
+
+`topologie.py` les concatène **dans l'ordre des noms**, en un seul script, et
+y injecte les données. Deux conséquences :
+
+- toutes les déclarations de premier niveau partagent la même portée : deux
+  `const` du même nom, dans deux fichiers, cassent la page entière ;
+- une `const` lue au chargement doit être déclarée dans un fichier qui passe
+  avant.
+
+### La base
+
+`sql/schema.sql` est la version 1, et chaque évolution passe par une
+migration `sql/migrations/NNNN_nom.sql`.
+
+- Une migration est **rejouable** (`IF NOT EXISTS`) et ne contient aucun
+  `GRANT`.
+- Les droits vont dans `sql/droits.sql`.
+- MariaDB refuse un `GRANT` sur une table qui n'existe pas encore : les droits
+  passent toujours en dernier.
+
+### Les tests
+
+```bash
+python3 tests_rentabilite.py    # calcul de l'arbre, coûts et options, CSV
+python3 tests_web.py            # routes et accès, comptes, dépôt, vues, CSP, cartes
+python3 tests_secret_store.py   # chiffrement des secrets
+python3 tests_capacite.py       # historique et projection
+python3 tests_pve_tls.py        # épinglage TLS, contre un vrai serveur local
+INVENTAIRE_TEST_MARIADB=detruire python3 tests_mariadb.py
+```
+
+`tests_mariadb.py` rejoue l'installation entière sur un vrai MariaDB :
+`setup_db.sql`, le schéma, les migrations, les droits. Puis il éprouve
+chaque compte avec ses seuls droits. **Il efface la base `inventory`** : à ne
+lancer que sur un MariaDB jetable, jamais sur une installation en service.
+
+### Intégration continue
+
+`.github/workflows/tests.yml` tourne à chaque push :
+
+- tous les tests dans un conteneur `debian:12` avec les paquets Debian,
+  c'est-à-dire les mêmes versions que la VM, `tests_mariadb.py` compris ;
+- les scripts shell vérifiés par `bash -n` ;
+- `ruff` en parallèle.
+
+### Conventions
+
+- Code, messages et documentation en français. Les commentaires du code
+  s'écrivent sans accents.
+- **Fins de ligne LF** (`.gitattributes`). Un `.sh` en CRLF donne
+  `$'': command not found`.
+- Rien de la page n'est appelé hors de son origine. Une ressource externe
+  casserait la CSP.
+
+---
+
+## Dépannage
+
+| Symptôme | Cause probable | Que faire |
+|---|---|---|
+| `Access denied for user 'inventory'` (1045) | un autre MariaDB tient le port 3306, ou le mot de passe chiffré ne correspond plus | `ss -tlnp \| grep 3306` doit montrer `mariadbd` ; sinon arrêter l'intrus. Sinon : supprimer `creds/inventory_db_password.cred` et relancer `preprod.sh` |
+| `preprod.sh` s'arrête sur « MariaDB ne démarre pas » | le port 3306 est pris (le script affiche le journal de MariaDB) | arrêter l'autre serveur, relancer |
+| rien ne change à l'écran après une mise à jour | la page n'avait pas été refaite | relancer `preprod.sh` (il la refait), ou lancer une collecte |
+| un hyperviseur reste « aucun token » | aucun jeton déposé pour lui | onglet **Jetons PVE**, cocher tous les nœuds du cluster |
+| dépôt refusé « certificat refusé » | ancienne version : le nom du certificat était comparé | mettre à jour, redéposer |
+| dépôt refusé 401 | la `value` a été mal copiée | `pveum user token remove inventory@pve readonly`, recréer, redéposer |
+| « délai dépassé », « certificat injoignable » | le port 8006 du nœud est fermé à la VM | pare-feu |
+| `echec de la collecte`, `cles API manquantes` | clés OVH absentes | `bash deploy/poser-secret.sh ovh` |
+| `identifiant ou mot de passe incorrect`, compte bloqué | 5 échecs : blocage de 15 min | onglet **Comptes** → Nouveau mot de passe, ou `inventory.sh --compte-local <login>` |
+| la page ne s'ouvre pas | nom non résolu, ou 443 fermé | DNS ou fichier hosts ; `ss -tlnp \| grep 443` doit montrer apache2 |
+
+Les journaux :
+
+```bash
+journalctl -u inventaire-collecte.service -n 50 --no-pager -o cat
+journalctl -u inventaire-web.service -n 50 --no-pager -o cat
+tail -n 30 /var/log/apache2/inventaire-error.log
+```
+
+---
+
+## Documentation
+
+| Document | Pour |
+|---|---|
+| [docs/preprod-pas-a-pas.md](docs/preprod-pas-a-pas.md) | **la mise en service**, étape par étape, à suivre à la lettre |
+| [docs/deploiement.md](docs/deploiement.md) | le détail de chaque étape faite à la main : comptes SQL, chiffrement, OIDC et MFA, journal, retour arrière |
+| [sql/migrations/LISEZMOI.md](sql/migrations/LISEZMOI.md) | écrire une migration |
+| [docs/architecture.html](docs/architecture.html) | schéma d'architecture |
