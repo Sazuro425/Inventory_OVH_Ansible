@@ -12,8 +12,10 @@ Auth : token API Proxmox, en lecture seule. Sur le noeud PVE :
 Le token s'ecrit : inventory@pve!readonly=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
 Certificat : Proxmox signe son certificat avec la CA interne du cluster, qui
-n'est dans aucun magasin public. Il faut donc lui fournir cette CA, ce qui
-donne une verification complete (chaine + nom d'hote), sans rien desactiver :
+n'est dans aucun magasin public. Deux facons de verifier, sans rien
+desactiver : epingler le certificat du noeud au premier contact (infra.yml,
+pve.pin_certs, voir PinnedAdapter), ou lui fournir cette CA, ce qui verifie
+la chaine et le nom d'hote :
   --ca-bundle /chemin/pve-root-ca.pem   deja recupere
   --ca-from-ssh root@HOTE               le script va le chercher par SSH
 
@@ -51,25 +53,43 @@ class PveError(RuntimeError):
 
 
 class PinnedAdapter(HTTPAdapter):
-    """Utilise le certificat du noeud lui-meme comme ancre de confiance.
+    """Utilise le certificat du noeud lui-meme comme seule ancre de confiance.
 
-    Rien n'est desactive : la chaine et le nom d'hote restent verifies.
-    VERIFY_X509_PARTIAL_CHAIN autorise simplement une ancre qui n'est pas une
-    racine, ce qui permet d'epingler le certificat feuille de PVE.
+    VERIFY_X509_PARTIAL_CHAIN autorise une ancre qui n'est pas une racine, ce
+    qui permet d'epingler le certificat feuille de PVE. La verification reste
+    obligatoire (CERT_REQUIRED) : seul ce certificat precis passe, donc seul
+    celui qui detient la clef privee du noeud. C'est le principe de la clef
+    d'hote SSH.
+
+    Le nom d'hote, lui, n'est PAS compare. PVE emet son certificat au nom du
+    noeud (pve-13, son IP), alors que la collecte le joint par le nom OVH
+    (nsXXXX.ip-a-b-c.eu) : la comparaison echouait sur tout le parc, sans
+    rien apporter, puisque l'identite est deja prouvee par l'epinglage.
     """
 
     def __init__(self, pem, **kw):
         self.ctx = ssl.create_default_context(cadata=pem)
         self.ctx.verify_flags |= ssl.VERIFY_X509_PARTIAL_CHAIN
+        self.ctx.check_hostname = False
+        self.ctx.verify_mode = ssl.CERT_REQUIRED
+        # Seconde serrure : urllib3 compare en plus l'empreinte SHA-256 du
+        # certificat presente a celle de l'epingle, octet pour octet. Elle
+        # remplace aussi la comparaison de nom qu'urllib3 refait de son cote
+        # quand celle de ssl est coupee (urllib3 1.26, Debian 12).
+        self.empreinte = fingerprint_of(pem).replace(":", "").lower()
         super().__init__(**kw)
 
-    def init_poolmanager(self, *a, **kw):
+    def _epingler(self, kw):
         kw["ssl_context"] = self.ctx
-        return super().init_poolmanager(*a, **kw)
+        kw["assert_fingerprint"] = self.empreinte
+        kw["assert_hostname"] = False
+        return kw
+
+    def init_poolmanager(self, *a, **kw):
+        return super().init_poolmanager(*a, **self._epingler(kw))
 
     def proxy_manager_for(self, *a, **kw):
-        kw["ssl_context"] = self.ctx
-        return super().proxy_manager_for(*a, **kw)
+        return super().proxy_manager_for(*a, **self._epingler(kw))
 
 
 def fingerprint_of(pem):

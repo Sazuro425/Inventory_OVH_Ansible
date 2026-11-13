@@ -106,7 +106,23 @@ apt-get update -qq
 apt-get install -y -qq mariadb-server apache2 openssl curl ca-certificates \
   python3 python3-yaml python3-pymysql python3-requests python3-cryptography \
   > /dev/null
-systemctl enable --now mariadb >/dev/null 2>&1
+if ! systemctl enable --now mariadb >/dev/null 2>&1; then
+  rouge "   MariaDB ne demarre pas. Ses dernieres lignes :"
+  journalctl -u mariadb -n 15 --no-pager -o cat 2>/dev/null | sed 's/^/     /' >&2
+  stop "MariaDB ne demarre pas (voir ci-dessus)"
+fi
+# Le port doit etre a ce MariaDB-la. Un autre serveur sur 3306 (MySQL, un
+# conteneur) recoit les connexions TCP de l'application, qui se font alors
+# refuser (erreur 1045), alors que "mariadb" en root, par le socket, voit la
+# bonne base : la panne parait incoherente.
+for _ in $(seq 1 20); do
+  ss -tlnpH 'sport = :3306' 2>/dev/null | grep -q . && break
+  sleep 0.5
+done
+occupant="$(ss -tlnpH 'sport = :3306' 2>/dev/null | grep -o 'users:(("[^"]*"' | head -1 | cut -d'"' -f2)"
+if [[ -n "$occupant" && "$occupant" != mariadbd && "$occupant" != mysqld ]]; then
+  stop "le port 3306 est tenu par '$occupant', pas par MariaDB : arrete-le ou change son port"
+fi
 vert "   paquets installes, MariaDB demarre"
 
 # --------------------------------------------------------------------------

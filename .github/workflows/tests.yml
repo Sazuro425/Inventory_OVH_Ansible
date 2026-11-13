@@ -33,6 +33,7 @@ jobs:
           python3 tests_web.py
           python3 tests_secret_store.py
           python3 tests_capacite.py
+          python3 tests_pve_tls.py
 
       - name: Tests sur MariaDB (setup_db, schema, migrations, droits)
         run: |

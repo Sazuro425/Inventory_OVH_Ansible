@@ -3,7 +3,8 @@ const DONNEES = __DATA__;
 // ---------------------------------------------------------------- constantes
 const TAILLE = {
   dc:   { w: 150, h: 54 },
-  srv:  { w: 236, h: 80 },
+  // un titre en gros, le nom complet dessous, puis trois lignes de detail
+  srv:  { w: 236, h: 96 },
   node: { w: 220, h: 80 },
   vm:   { w: 210, h: 60 },
 };
@@ -175,18 +176,26 @@ function dessiner() {
       class: 'bande', width: 4, height: t.h, rx: 2,
       fill: COULEUR[n.etat] || COULEUR[n.kind] || 'var(--doux)' }));
     // le titre ne doit jamais passer sous le badge : on le tronque sur la
-    // place reellement disponible (~6.4 px par caractere a 12.5 px)
-    const placeBadge = n.badge ? n.badge.length * 5.6 + 12 : 0;
-    const maxCar = Math.max(6, Math.floor((t.w - 26 - placeBadge) / 6.4));
+    // place reellement disponible (~6.4 px par caractere a 12.5 px, ~8 px
+    // pour le titre en gros d'une carte qui porte un sous-titre)
+    const gros = !!n.sous;
+    // avec un sous-titre, le badge descend sur sa ligne : le titre garde
+    // toute la largeur
+    const placeBadge = n.badge && !gros ? n.badge.length * 5.6 + 12 : 0;
+    const maxCar = Math.max(6, Math.floor((t.w - 26 - placeBadge) / (gros ? 8.2 : 6.4)));
     const titre = n.titre.length > maxCar
       ? n.titre.slice(0, maxCar - 1) + '…' : n.titre;
-    const elTitre = svgEl('text', { class: 'titre', x: 14, y: 21 }, titre);
+    const elTitre = svgEl('text', { class: gros ? 'titre gros' : 'titre', x: 14,
+                                    y: gros ? 23 : 21 }, titre);
     if (titre !== n.titre) elTitre.appendChild(svgEl('title', {}, n.titre));
     g.appendChild(elTitre);
+    // le nom complet, sous le titre, en entier
+    if (gros) g.appendChild(svgEl('text', { class: 'sous-titre', x: 14, y: 39 }, n.sous));
     (n.lignes || []).forEach((l, i) =>
-      g.appendChild(svgEl('text', { class: 'detail', x: 14, y: 38 + i * 15 }, l)));
+      g.appendChild(svgEl('text', { class: 'detail', x: 14,
+                                    y: (gros ? 56 : 38) + i * 15 }, l)));
     if (n.badge)
-      g.appendChild(svgEl('text', { class: 'badge', x: t.w - 12, y: 21 }, n.badge));
+      g.appendChild(svgEl('text', { class: 'badge', x: t.w - 12, y: gros ? 39 : 21 }, n.badge));
 
     if (n.enfants.length) {
       const plie = etat.plies.has(n.id);

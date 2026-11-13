@@ -30,10 +30,20 @@ function periode(f, valeur) {
   return s;
 }
 
+// Le message se place juste au-dessus des boutons, et revient a l'ecran :
+// ajoute en fin de formulaire, il tombait sous les boutons, hors de la vue
+// dans un tiroir qui defile, et un refus passait pour un clic sans effet.
 function message(f, texte, ok) {
-  const p = f.querySelector('.msg') || f.appendChild(el('p'));
+  let p = f.querySelector('.msg');
+  if (!p) {
+    p = el('p', { role: 'alert' });
+    const actions = f.querySelector('.actions');
+    if (actions && actions.parentNode === f) f.insertBefore(p, actions);
+    else f.appendChild(p);
+  }
   p.className = 'msg ' + (ok ? 'ok' : 'ko');
   p.textContent = texte;
+  p.scrollIntoView({ block: 'nearest' });
 }
 
 async function poster(url, charge) {
@@ -74,7 +84,9 @@ function flash(texte) {
   z.textContent = texte;
   z.classList.add('visible');
   clearTimeout(flash.t);
-  flash.t = setTimeout(() => z.classList.remove('visible'), 2600);
+  // le temps de lire : une phrase longue reste plus longtemps
+  flash.t = setTimeout(() => z.classList.remove('visible'),
+                       Math.max(2600, 70 * texte.length));
 }
 
 // Le choix d'un role : le catalogue, et de quoi l'etendre sans quitter le

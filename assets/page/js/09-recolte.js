@@ -151,6 +151,11 @@ const commandesPve = echeance => [
     + (echeance ? " --expire $(date -d '" + echeance + " 23:59:59' +%s)" : ''),
 ].join('\n');
 
+// ce qu'on cherche dans ce qui a ete colle : la valeur d'un jeton PVE, et
+// son identifiant complet
+const UUID_JETON = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const ID_JETON = /[\w.-]+@[\w.-]+![\w.-]+/;
+
 function dansUnAn() {
   const d = new Date();
   d.setFullYear(d.getFullYear() + 1);
@@ -179,8 +184,11 @@ function formDepot(choisis) {
   const f = el('form', { autocomplete: 'off', className: 'saisie' });
   const ident = champ(f, 'Identifiant du jeton (full-tokenid)', { type: 'text',
     value: 'inventory@pve!readonly', maxLength: 160, required: true, spellcheck: false });
+  // Pas de limite a 36 : une ligne copiee depuis le tableau de pveum
+  // (espaces, bordures) etait coupee en silence, puis le depot refuse. On
+  // garde ce qui est colle et on en tire l'UUID a l'envoi.
   const secret = champ(f, 'Valeur du jeton (value)', { type: 'password',
-    autocomplete: 'off', required: true, maxLength: 36, spellcheck: false,
+    autocomplete: 'off', required: true, maxLength: 300, spellcheck: false,
     placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' });
   const echeance = champ(f, 'Échéance du jeton (pveum --expire)', { type: 'date',
     value: dansUnAn(), min: new Date(Date.now() + 86400000).toISOString().slice(0, 10) });
@@ -209,12 +217,28 @@ function formDepot(choisis) {
     ev.preventDefault();
     const hotes = cases.filter(c => c.checked).map(c => c.value);
     if (!hotes.length) { message(f, 'coche au moins un hyperviseur', false); return; }
-    const jeton = ident.value.trim() + '=' + secret.value.trim();
+    const uuid = secret.value.match(UUID_JETON);
+    if (!uuid) {
+      message(f, 'valeur illisible : colle la « value » affichée par pveum, de la '
+                 + 'forme xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', false);
+      return;
+    }
+    // l'identifiant tel que pveum l'affiche, ou colle avec la valeur
+    // ("inventory@pve!readonly=uuid") ; bordures et espaces ignores
+    const id = (secret.value.match(ID_JETON) || ident.value.match(ID_JETON) || [])[0];
+    if (!id) {
+      message(f, 'identifiant illisible : utilisateur@realm!nom, par exemple '
+                 + 'inventory@pve!readonly', false);
+      return;
+    }
+    const jeton = id + '=' + uuid[0].toLowerCase();
     soumettre(f, async () => {
       await poster('/api/recolte/jeton', { hotes, jeton, expire_le: echeance.value });
       secret.value = '';
       await chargerRecolte();
-    }, 'Jeton scellé pour ' + hotes.length + ' hyperviseur(s) : testé à la prochaine collecte.');
+    }, 'Jeton scellé pour ' + hotes.length + ' hyperviseur(s). Il sera testé à la '
+       + 'prochaine collecte : pour ne pas attendre, systemctl start '
+       + 'inventaire-collecte.service sur la VM.');
   };
   corps.appendChild(f);
   secret.focus();

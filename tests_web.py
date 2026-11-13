@@ -679,6 +679,22 @@ def _():
     egal(orch.token_for(conf, "ns2.eu"), "env:DEF", "depots desactives")
 
 
+@test("carte serveur : le reverse en titre, le nom complet dessous")
+def _():
+    import topologie
+    nom = "ns3019264.ip-79-137-6.eu"
+    # sans reverse personnalise, OVH rend le nom : on n'en garde que le debut
+    egal(topologie.titre_serveur({"reverse": nom, "ovh_name": nom}), "ns3019264")
+    egal(topologie.titre_serveur({"reverse": "", "ovh_name": nom}), "ns3019264")
+    egal(topologie.titre_serveur({"reverse": "pve-gra-03.exemple.fr",
+                                  "ovh_name": nom}), "pve-gra-03.exemple.fr")
+    srv = [n for n in topologie.construire({
+        "servers": [{"ovh_name": nom, "reverse": "pve-gra-03.exemple.fr",
+                     "datacenter": "gra3"}],
+        "probes": [], "guests": []})[0] if n["kind"] == "srv"][0]
+    egal((srv["titre"], srv["sous"]), ("pve-gra-03.exemple.fr", nom))
+
+
 # --------------------------------------------------------------------------
 
 def main():

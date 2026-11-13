@@ -59,6 +59,20 @@ def go(mo):
     return "{:g} Go".format(round(mo / 1024, 1)) if mo else "?"
 
 
+def titre_serveur(srv):
+    """Le titre d'une carte de serveur : le reverse, en gros.
+
+    Un reverse personnalise (pve-gra-03.exemple.fr) se suffit. Sans reverse,
+    OVH renvoie le nom du serveur (ns3019264.ip-79-137-6.eu) : on n'en garde
+    que la partie qui le distingue, le nom complet etant affiche dessous.
+    """
+    reverse = srv.get("reverse") or ""
+    nom = srv.get("ovh_name") or ""
+    if reverse and reverse != nom:
+        return reverse
+    return (reverse or nom).split(".")[0]
+
+
 def badge_expiration(valeur, seuil=120):
     """Rien tant que l'echeance est lointaine : un badge permanent n'alerte
     plus personne et prend la place du titre."""
@@ -179,7 +193,9 @@ def construire(data, acces=None, conf=None):
                 "cluster": ((probes_par_hote.get(srv.get("reverse")) or {})
                             .get("cluster")
                             or "inconnu:" + (srv.get("reverse") or "")),
-                "libelle": "Serveur dédié", "titre": srv.get("reverse") or "",
+                "libelle": "Serveur dédié", "titre": titre_serveur(srv),
+                # le nom complet, toujours lisible sous le titre
+                "sous": srv.get("ovh_name") or srv.get("reverse") or "",
                 "lignes": [l for l in (
                     offre or None,
                     "{} · {}c/{}t · {}".format(
