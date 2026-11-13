@@ -390,6 +390,7 @@
   .jauge.tendue i { background:var(--ambre); }
   .jauge.trop i { background:var(--rouge); }
   .capa small { color:var(--doux); font-size:11px; }
+  .capa.vm { color:var(--doux); font-size:11px; padding-left:71px; }
 
   .rent-orph { max-width:900px; }
   .rent-orph li .lecture { margin:0; flex:0 1 auto; }

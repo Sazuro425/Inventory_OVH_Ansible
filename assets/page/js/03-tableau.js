@@ -63,6 +63,17 @@ const COLONNES_PLAT = [
     num: true, euro: true, somme: true, signe: true, val: r => r.c.roi },
   { id: 'marge', titre: 'Marge %', niv: ['cluster', 'serveur', 'vm', 'element', 'tout'],
     num: true, dec: 1, val: r => marge(r.c) },
+  { id: 'ram_alloue', titre: 'RAM allouée (Go)', niv: ['cluster', 'serveur', 'vm'],
+    num: true, dec: 0, val: r => r.c.type === 'vm'
+      ? (r.c.infos.ram_mb ? r.c.infos.ram_mb / 1024 : null)
+      : ((r.c.capacite || {}).alloue || {}).ram_mb / 1024 || null },
+  { id: 'ram_phys', titre: 'RAM physique (Go)', niv: ['cluster', 'serveur'],
+    num: true, dec: 0, val: r => ((r.c.capacite || {}).physique || {}).ram_mb / 1024 || null },
+  { id: 'vcpu_alloue', titre: 'vCPU alloués', niv: ['cluster', 'serveur', 'vm'],
+    num: true, dec: 0, val: r => r.c.type === 'vm' ? n0(r.c.infos.cpus)
+      : n0(((r.c.capacite || {}).alloue || {}).vcpu) },
+  { id: 'threads', titre: 'Threads physiques', niv: ['cluster', 'serveur'],
+    num: true, dec: 0, val: r => n0(((r.c.capacite || {}).physique || {}).vcpu) },
   { id: 'ram_pct', titre: 'RAM allouée %', niv: ['cluster', 'serveur'],
     num: true, dec: 1, val: r => n0((r.c.capacite || {}).ram_pct) },
   { id: 'ram_libre', titre: 'RAM libre (Go)', niv: ['cluster', 'serveur'],
@@ -100,9 +111,11 @@ const COLONNES_ARBRE = [
   colArbre('marge', 'Marge', c => el('td', { className: 'num doux',
     textContent: c.pv ? Math.round(100 * c.roi / c.pv) + ' %' : '—' }), { num: true, defaut: true }),
   colArbre('capa', 'Capacité', c => el('td', null,
-    (c.type === 'cluster' || c.type === 'serveur') ? jauge(c.capacite) : el('span')),
+    (c.type === 'cluster' || c.type === 'serveur') ? jauge(c.capacite)
+      : c.type === 'vm' ? ressourcesVm(c) : el('span')),
     { defaut: true }),
-  ...['pa_auto', 'nb_vm', 'ram_pct', 'ram_libre', 'vcpu_ratio', 'role', 'offre', 'dc',
+  ...['pa_auto', 'nb_vm', 'ram_alloue', 'ram_phys', 'ram_pct', 'ram_libre', 'vcpu_alloue',
+      'threads', 'vcpu_ratio', 'role', 'offre', 'dc',
       'noeud', 'statut', 'vcpu', 'ram', 'client', 'contrat', 'corr', 'alertes']
     .map(depuisPlat),
 ];

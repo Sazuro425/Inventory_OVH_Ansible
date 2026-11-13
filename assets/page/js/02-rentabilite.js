@@ -408,18 +408,35 @@ function kpi(titre, valeur, sous, classe) {
             el('small', { textContent: sous || '' }));
 }
 
+// "70 / 125 Go" : l'unite une seule fois
+const goSur = (a, p) => go(a).replace(' Go', '') + ' / ' + go(p);
+
+// La capacite d'un cluster ou d'un serveur : la jauge de RAM, puis les
+// chiffres en clair, alloue sur physique, pour la RAM comme pour les vCPU.
 function jauge(cap) {
   if (!cap || cap.ram_pct === undefined) return el('span', { className: 'lecture', textContent: '—' });
   const p = cap.ram_pct;
   const barre = el('i');
   barre.style.width = Math.min(100, p) + '%';
   const cadre = el('span', { className: 'jauge' + (p > 100 ? ' trop'
-                                    : p >= 85 ? ' tendue' : '') }, barre);
-  const txt = 'RAM ' + pct(p)
-    + (cap.vcpu_ratio !== undefined ? ' · vCPU ' + cap.vcpu_ratio.toLocaleString('fr-FR') + '×' : '');
+                                    : p >= 85 ? ' tendue' : ''), title: 'RAM ' + pct(p) }, barre);
+  const ram = 'RAM ' + goSur(cap.alloue.ram_mb, cap.physique.ram_mb) + ' (' + pct(p) + ')';
+  const vcpu = cap.physique.vcpu
+    ? 'vCPU ' + cap.alloue.vcpu + ' / ' + cap.physique.vcpu
+      + (cap.vcpu_ratio !== undefined ? ' (' + cap.vcpu_ratio.toLocaleString('fr-FR') + '×)' : '')
+    : 'vCPU ' + cap.alloue.vcpu;
   return el('span', { className: 'capa', title: go(cap.alloue.ram_mb) + ' alloués sur '
     + go(cap.physique.ram_mb) + ' · ' + cap.alloue.vcpu + ' vCPU sur '
-    + (cap.physique.vcpu || '?') + ' threads' }, cadre, el('small', { textContent: txt }));
+    + (cap.physique.vcpu || '?') + ' threads' },
+    cadre, el('small', { textContent: ram + ' · ' + vcpu }));
+}
+
+// Une VM dans la colonne Capacite : ce qu'elle prend a son hyperviseur
+function ressourcesVm(c) {
+  const morceaux = [];
+  if (c.infos.ram_mb) morceaux.push(go(c.infos.ram_mb));
+  if (c.infos.cpus) morceaux.push(c.infos.cpus + ' vCPU');
+  return el('span', { className: 'capa vm', textContent: morceaux.join(' · ') || '—' });
 }
 
 function ligneRent(c, prof, chemin, ouvert) {
