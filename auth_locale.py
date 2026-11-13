@@ -301,6 +301,9 @@ def creer_compte(conn, login, roles, par):
     if _existe(conn, login):
         raise inventory_db.VenteInvalide(
             "le compte {} existe deja : reinitialise-le plutot".format(login))
+    # la page envoie une liste, la ligne de commande un texte
+    if isinstance(roles, list):
+        roles = ",".join(r for r in roles if isinstance(r, str))
     return creer_ou_reinitialiser(conn, login, roles, par)
 
 
