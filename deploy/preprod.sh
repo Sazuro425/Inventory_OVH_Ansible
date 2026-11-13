@@ -263,6 +263,20 @@ apres la premiere collecte (cles OVH posees, puis collecte lancee).</p>
 HTML
   chown inventaire:www-data "$RACINE_WEB/index.html"
   chmod 640 "$RACINE_WEB/index.html"
+elif [[ "$(sql -e "SELECT COUNT(*) FROM inventory.collect_run")" -gt 0 ]]; then
+  # Une mise a jour : la page servie a ete fabriquee par l'ancien code, a la
+  # derniere collecte. On la refait tout de suite avec le nouveau, depuis le
+  # dernier snapshot en base : sans cela, rien ne change a l'ecran avant la
+  # collecte suivante (jusqu'a une heure).
+  if systemd-run --quiet --wait --collect --pipe -p User=inventaire \
+       -p WorkingDirectory="$PREFIXE" \
+       -p LoadCredentialEncrypted=inventory_db_password:"$CREDS/inventory_db_password.cred" \
+       /usr/bin/python3 "$PREFIXE/topologie.py" --out "$RACINE_WEB/index.html" \
+       > /dev/null 2>&1; then
+    vert "   page refaite avec le nouveau code, depuis le dernier snapshot"
+  else
+    jaune "   page non refaite : elle le sera a la prochaine collecte"
+  fi
 fi
 
 systemctl enable inventaire-web.service >/dev/null 2>&1
