@@ -59,17 +59,20 @@ def go(mo):
     return "{:g} Go".format(round(mo / 1024, 1)) if mo else "?"
 
 
-def titre_serveur(srv):
-    """Le titre d'une carte de serveur : le reverse, en gros.
+def titre_serveur(srv, noeud=None):
+    """Le titre d'une carte de serveur, en gros : le vrai nom de la machine.
 
-    Un reverse personnalise (pve-gra-03.exemple.fr) se suffit. Sans reverse,
-    OVH renvoie le nom du serveur (ns3019264.ip-79-137-6.eu) : on n'en garde
-    que la partie qui le distingue, le nom complet etant affiche dessous.
+    Dans l'ordre : le reverse personnalise (pve01-si.novacloud.bzh) ; a
+    defaut, le nom du noeud Proxmox, connu des que son jeton passe ; a defaut
+    encore, le debut du nom OVH (ns3019264). Le nom OVH complet est affiche
+    dessous dans tous les cas.
     """
-    reverse = srv.get("reverse") or ""
+    reverse = (srv.get("reverse") or "").rstrip(".")
     nom = srv.get("ovh_name") or ""
     if reverse and reverse != nom:
         return reverse
+    if noeud:
+        return noeud
     return (reverse or nom).split(".")[0]
 
 
@@ -193,7 +196,9 @@ def construire(data, acces=None, conf=None):
                 "cluster": ((probes_par_hote.get(srv.get("reverse")) or {})
                             .get("cluster")
                             or "inconnu:" + (srv.get("reverse") or "")),
-                "libelle": "Serveur dédié", "titre": titre_serveur(srv),
+                "libelle": "Serveur dédié",
+                "titre": titre_serveur(srv, (probes_par_hote.get(srv.get("reverse"))
+                                             or {}).get("node")),
                 # le nom complet, toujours lisible sous le titre
                 "sous": srv.get("ovh_name") or srv.get("reverse") or "",
                 "lignes": [l for l in (

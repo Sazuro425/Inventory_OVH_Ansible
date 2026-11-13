@@ -688,11 +688,24 @@ def _():
     egal(topologie.titre_serveur({"reverse": "", "ovh_name": nom}), "ns3019264")
     egal(topologie.titre_serveur({"reverse": "pve-gra-03.exemple.fr",
                                   "ovh_name": nom}), "pve-gra-03.exemple.fr")
+    # le point final du DNS brut ne s'affiche pas
+    egal(topologie.titre_serveur({"reverse": "novasys27.exemple.coop.",
+                                  "ovh_name": nom}), "novasys27.exemple.coop")
+    # sans reverse personnalise, le nom du noeud Proxmox des qu'il est connu
+    egal(topologie.titre_serveur({"reverse": nom, "ovh_name": nom}, "pve-13"), "pve-13")
+    egal(topologie.titre_serveur({"reverse": "pve-gra-03.exemple.fr", "ovh_name": nom},
+                                 "pve-13"), "pve-gra-03.exemple.fr", "le reverse prime")
     srv = [n for n in topologie.construire({
         "servers": [{"ovh_name": nom, "reverse": "pve-gra-03.exemple.fr",
                      "datacenter": "gra3"}],
         "probes": [], "guests": []})[0] if n["kind"] == "srv"][0]
     egal((srv["titre"], srv["sous"]), ("pve-gra-03.exemple.fr", nom))
+    srv = [n for n in topologie.construire({
+        "servers": [{"ovh_name": nom, "reverse": nom, "datacenter": "gra3"}],
+        "probes": [{"host": nom, "node": "pve-13", "cluster": "prod",
+                    "members": [], "error": None}],
+        "guests": []})[0] if n["kind"] == "srv"][0]
+    egal((srv["titre"], srv["sous"]), ("pve-13", nom), "noeud sonde")
 
 
 # --------------------------------------------------------------------------

@@ -270,7 +270,10 @@ def fetch_ovh_servers(conf, workers):
 
         return {
             "ovh_name": name,
-            "reverse": d.get("reverse") or name,
+            # OVH rend le reverse sous sa forme DNS brute, point final
+            # compris (novasys27.novasys.coop.) : on l'en debarrasse, il
+            # sert de nom d'hote, de nom de certificat epingle et de clef
+            "reverse": (d.get("reverse") or "").rstrip(".") or name,
             "ip": d.get("ip") or "",
             "offer": d.get("commercialRange") or "",
             "datacenter": d.get("datacenter") or "",
