@@ -42,7 +42,8 @@ EnvironmentFile=-/etc/inventaire-infra.env
 # dans le service expose derriere Apache donnerait tous les jetons PVE.
 #LoadCredentialEncrypted=master_key:/etc/inventaire-infra/creds/master_key.cred
 
-Environment=INVENTAIRE_LOCK=/run/inventaire-infra.lock
+# dans RuntimeDirectory (ci-dessous) : /run lui-meme n'est ecrit que par root
+Environment=INVENTAIRE_LOCK=/run/inventaire-infra/collecte.lock
 # Page publiee apres chaque collecte ; commenter pour ne rien publier
 Environment=INVENTAIRE_WEB=/var/www/inventaire/index.html
 

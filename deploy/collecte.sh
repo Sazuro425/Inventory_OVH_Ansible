@@ -69,8 +69,11 @@ if ! "$PYTHON" inventory_cli.py --traiter-depots; then
   echo "depots de jetons non traites (la collecte continue)" >&2
 fi
 
-if ! "$PYTHON" infra_inventory.py --refresh --store-db > /dev/null; then
-  code=$?
+# Le code se lit avec "|| code=$?" : apres "if ! commande", $? vaut 0 et un
+# echec remontait a systemd comme une reussite.
+code=0
+"$PYTHON" infra_inventory.py --refresh --store-db > /dev/null || code=$?
+if [[ $code -ne 0 ]]; then
   echo "echec de la collecte (code $code)" >&2
   exit "$code"
 fi

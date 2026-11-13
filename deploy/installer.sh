@@ -4,6 +4,9 @@
 #   sudo ./deploy/installer.sh --simulation     montre ce qui serait fait
 #   sudo ./deploy/installer.sh                  installe
 #   sudo ./deploy/installer.sh --sans-apache    sans le vhost
+#   sudo ./deploy/installer.sh --secrets-chiffres
+#        sans fichier d'environnement : les secrets sont poses directement
+#        par systemd-creds (c'est ce que fait deploy/preprod.sh)
 #
 # Le script est idempotent : on peut le rejouer pour mettre a jour le code.
 # Il ne remplace jamais un fichier de configuration deja renseigne — ni
@@ -27,6 +30,7 @@ SIMULATION=0
 AVEC_APACHE=1
 AVEC_WEB=1
 AVEC_TIMER=1
+SECRETS_CHIFFRES=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -34,8 +38,9 @@ while [[ $# -gt 0 ]]; do
     --sans-apache)   AVEC_APACHE=0 ;;
     --sans-web)      AVEC_WEB=0 ;;
     --sans-timer)    AVEC_TIMER=0 ;;
+    --secrets-chiffres) SECRETS_CHIFFRES=1 ;;
     --prefixe)       PREFIXE="$2"; shift ;;
-    -h|--help)       sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help)       sed -n '2,23p' "$0"; exit 0 ;;
     *) echo "option inconnue : $1" >&2; exit 2 ;;
   esac
   shift
@@ -141,7 +146,9 @@ vert "   code en place"
 # --------------------------------------------------------------------------
 etape "Secrets"
 
-if [[ -e "$FICHIER_ENV" ]]; then
+if [[ $SECRETS_CHIFFRES -eq 1 ]]; then
+  vert "   --secrets-chiffres : aucun fichier d'environnement depose"
+elif [[ -e "$FICHIER_ENV" ]]; then
   vert "   $FICHIER_ENV conserve"
 else
   faire cp "$SOURCE/deploy/inventaire.env.example" "$FICHIER_ENV"
@@ -155,7 +162,7 @@ fi
 # joignable depuis le reseau. L'unite le charge avec "EnvironmentFile=-", qui
 # tolere son absence — le service demarrerait donc sans mot de passe, pour
 # echouer a la premiere requete. D'ou le depot ici.
-if [[ $AVEC_WEB -eq 1 ]]; then
+if [[ $AVEC_WEB -eq 1 && $SECRETS_CHIFFRES -eq 0 ]]; then
   if [[ -e "$FICHIER_ENV_WEB" ]]; then
     vert "   $FICHIER_ENV_WEB conserve"
   else
@@ -185,6 +192,10 @@ etape "Unites systemd"
 installer_unite() {
   local nom="$1"
   [[ -f "$SOURCE/deploy/$nom" ]] || return 0
+  if cmp -s "$SOURCE/deploy/$nom" "/etc/systemd/system/$nom"; then
+    vert "   $nom a jour"
+    return 0
+  fi
   sauvegarder "/etc/systemd/system/$nom"
   faire cp "$SOURCE/deploy/$nom" "/etc/systemd/system/$nom"
   # Les fichiers venant d'un montage Windows arrivent en 755 ; systemd
@@ -227,6 +238,12 @@ fi
 
 # --------------------------------------------------------------------------
 etape "Ce qu'il reste a faire"
+
+if [[ $SECRETS_CHIFFRES -eq 1 ]]; then
+  # deploy/preprod.sh prend la suite : base, secrets, Apache
+  vert "   la suite est faite par deploy/preprod.sh"
+  exit 0
+fi
 
 RESTE=()
 grep -q '^OVH_APPLICATION_KEY=.\+' "$FICHIER_ENV" 2>/dev/null \

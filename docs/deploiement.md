@@ -1,5 +1,10 @@
 # Deploiement sur la VM
 
+> **Pour une préprod, suis plutôt [preprod-pas-a-pas.md](preprod-pas-a-pas.md)** :
+> `deploy/preprod.sh` fait les étapes 1 à 9 de ce document en une commande,
+> secrets chiffrés dès le départ. Ce document-ci reste la référence pour
+> comprendre chaque étape ou la faire à la main.
+
 Suivi pas a pas, dans cet ordre. Chaque etape se verifie avant de passer a la
 suivante : une base sans ses `GRANT` ou une clef maitresse posee avant les
 comptes se rattrapent mal.

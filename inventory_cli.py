@@ -5,6 +5,8 @@ inventory - administration des secrets de l'inventaire.
     inventory --list                 etat des secrets, sans rien dechiffrer
     inventory --init-key             tire une clef maitresse (premiere fois)
     inventory --ovh                  renouvelle les trois clefs OVH
+    inventory --tester-ovh           teste les clefs OVH que la collecte
+                                     utilisera (systemd-creds ou env)
     inventory --pve HOTE             renouvelle le jeton d'un hyperviseur
     inventory --db                   change le mot de passe de la base
     inventory --rotate-key           rechiffre tout sous une nouvelle clef
@@ -365,6 +367,28 @@ def commande_ovh(args, conf, conn, cle):
     return 0
 
 
+def commande_tester_ovh(args, conf):
+    """Teste les clefs OVH la ou la collecte les lit : secrets systemd,
+    puis environnement. N'ecrit rien et n'ouvre pas la base."""
+    valeurs, manquants = {}, []
+    for nom, _ in CHAMPS_OVH:
+        valeurs[nom] = secrets_infra.lire_secret(nom, nom.upper())
+        if not valeurs[nom]:
+            manquants.append(nom)
+    if manquants:
+        erreur("clef(s) OVH absente(s) : " + ", ".join(manquants))
+        erreur("a poser avec : sudo ./deploy/poser-secret.sh ovh")
+        return 1
+    ok, motif = tester_ovh(valeurs, conf["ovh"].get("endpoint", "ovh-eu"))
+    if not ok:
+        print()
+        erreur(motif)
+        return 1
+    print()
+    print("  clefs OVH valides.")
+    return 0
+
+
 # la collecte cherche les jetons deposes sous ce meme nom
 nom_secret_pve = secret_store.nom_secret_pve
 
@@ -676,6 +700,8 @@ def main():
                    help="tire une clef maitresse")
     g.add_argument("--ovh", action="store_true",
                    help="renouvelle les trois clefs OVH")
+    g.add_argument("--tester-ovh", action="store_true",
+                   help="teste les clefs OVH que la collecte utilisera")
     g.add_argument("--pve", metavar="HOTE", nargs="?", const="",
                    help="renouvelle le jeton d'un hyperviseur")
     g.add_argument("--db", action="store_true",
@@ -713,6 +739,9 @@ def main():
     # tout le reste, puisqu'il sert justement quand rien n'est encore pose.
     if args.init_key:
         return commande_init_key(args, conf)
+    # pas de base non plus : les clefs viennent de systemd ou de l'environnement
+    if args.tester_ovh:
+        return commande_tester_ovh(args, conf)
 
     # Tirer la clef de rotation ne demande pas la base non plus. La traiter
     # ici permet de preparer une rotation avant que la base soit joignable,
