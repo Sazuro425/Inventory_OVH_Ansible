@@ -280,7 +280,7 @@ function ouvrirRent(chemin) {
   // un filtre pourrait cacher la carte qu'on vient demander
   effacerFiltres();
   majBoutonFiltres();
-  basculerRent(true);
+  ouvrirOnglet('rent');
   const tr = document.querySelector('tr[data-cle="' + CSS.escape(vueRent.cible) + '"]');
   if (tr) tr.scrollIntoView({ block: 'center' });
 }
@@ -340,9 +340,30 @@ function dessinerRent() {
   majModifiee();
 }
 
+function celluleMontant(c, quoi) {
+  const corr = c.corrections[quoi === 'pa' ? 'prix_achat' : 'prix_vente'];
+  const t = el('td', { className: 'num', textContent: euro(c[quoi]) });
+  if (corr) {
+    t.classList.add('corrige');
+    t.title = (quoi === 'pa' ? 'PA' : 'PV') + ' propre corrigé à ' + euro(corr.valeur)
+      + (quoi === 'pa' && corr.auto !== null ? ' (collecté : ' + euro(corr.auto) + ')' : '')
+      + ' par ' + corr.par + ' — ' + corr.motif;
+  }
+  return t;
+}
+
+function enteteArbre() {
+  const tr = el('tr', null, el('th', { textContent: 'Carte' }),
+    ...colonnesNiveau('arbre').map(k => el('th', { className: k.num ? 'num' : '',
+                                                   textContent: k.titre })),
+    el('th'));
+  document.getElementById('arbre-tete').replaceChildren(tr);
+}
+
 function dessinerArbre() {
   const corps = document.getElementById('rent-corps');
   corps.replaceChildren();
+  enteteArbre();
   const filtre = vueRent.filtre || vueRent.perte || vueRent.alertes;
   const ajouter = (c, prof, chemin) => {
     if (filtre && !garde(c)) return;
@@ -355,7 +376,7 @@ function dessinerArbre() {
   };
   commerce.arbre.forEach(c => ajouter(c, 0, []));
   if (!corps.children.length) {
-    corps.appendChild(el('tr', null, el('td', { colSpan: 7,
+    corps.appendChild(el('tr', null, el('td', { colSpan: colonnesNiveau('arbre').length + 2,
       className: 'lecture', textContent: 'Aucune carte ne correspond.' })));
   }
 }
@@ -446,24 +467,7 @@ function ligneRent(c, prof, chemin, ouvert) {
   }
   tr.appendChild(td);
 
-  const montant = (v, corrige, titre) => {
-    const t = el('td', { className: 'num', textContent: euro(v) });
-    if (corrige) { t.classList.add('corrige'); t.title = titre; }
-    return t;
-  };
-  const cp = c.corrections.prix_achat, cv = c.corrections.prix_vente;
-  tr.appendChild(montant(c.pa, cp, cp ? 'PA propre corrigé à ' + euro(cp.valeur)
-    + (cp.auto !== null ? ' (collecté : ' + euro(cp.auto) + ')' : '')
-    + ' par ' + cp.par + ' — ' + cp.motif : ''));
-  tr.appendChild(montant(c.pv, cv, cv ? 'PV propre corrigé à ' + euro(cv.valeur)
-    + ' par ' + cv.par + ' — ' + cv.motif : ''));
-  const roi = el('td', { className: 'num marge ' + classeMarge(c.roi),
-                         textContent: signe(c.roi) });
-  tr.appendChild(roi);
-  tr.appendChild(el('td', { className: 'num doux',
-    textContent: c.pv ? Math.round(100 * c.roi / c.pv) + ' %' : '—' }));
-  tr.appendChild(el('td', null, (c.type === 'cluster' || c.type === 'serveur')
-    ? jauge(c.capacite) : el('span')));
+  for (const k of colonnesNiveau('arbre')) tr.appendChild(k.cellule(c));
 
   tr.appendChild(actionsCarte(c));
   return tr;

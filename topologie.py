@@ -112,6 +112,17 @@ def construire(data, acces=None, conf=None):
     couts = {c.get("ovh_name"): c.get("price_month")
              for c in (data.get("costs") or [])
              if c.get("ovh_name")}
+    # le detail : l'offre et ses options, pour la fiche
+    detail_couts = {c.get("ovh_name"): c for c in (data.get("costs") or [])
+                    if c.get("ovh_name")}
+
+    def detail_cout(nom):
+        c = detail_couts.get(nom) or {}
+        if not c.get("options"):
+            return None
+        return "offre {} + {} option(s) {}".format(
+            euros_mois(c.get("base_month")) or "?", len(c["options"]),
+            euros_mois(c.get("options_month")) or "?")
 
     def nom_court_cluster(brut):
         """Le nom du cluster, ou None quand il n'y en a pas de vrai.
@@ -242,6 +253,7 @@ def construire(data, acces=None, conf=None):
                         .get("cluster")),
                     "Coût OVH": euros_mois(
                         couts.get(srv.get("ovh_name") or "")),
+                    "Dont": detail_cout(srv.get("ovh_name") or ""),
                 },
             })
 

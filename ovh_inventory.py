@@ -284,6 +284,25 @@ def _mois_depuis_iso(duree):
     return total or None
 
 
+def _prix_au_mois(service):
+    """Le prix d'un service /services, ramene au mois. None s'il n'en a pas.
+
+    Sans periode annoncee, OVH facture au mois sur du dedie : on le prend
+    tel quel.
+    """
+    tar = (service.get("billing") or {}).get("pricing") or {}
+    valeur = (tar.get("price") or {}).get("value")
+    if valeur is None:
+        return None
+    periode = tar.get("duration")
+    mois = _mois_depuis_iso(periode)
+    if mois:
+        return round(float(valeur) / mois, 2)
+    if not periode:
+        return round(float(valeur), 2)
+    return None
+
+
 def fetch_costs(cli, workers):
     """Le prix paye pour chaque serveur dedie, via l'API /services.
 
@@ -332,16 +351,33 @@ def fetch_costs(cli, workers):
         prix = tar.get("price") or {}
         valeur = prix.get("value")
         periode = tar.get("duration")
-        mois = _mois_depuis_iso(periode)
+        base = _prix_au_mois(s)
 
-        if valeur is not None and mois:
-            au_mois = round(float(valeur) / mois, 2)
-        elif valeur is not None and not periode:
-            # pas de periode annoncee : OVH facture au mois par defaut sur du
-            # dedie, mais on le signale plutot que de le deviner en silence
-            au_mois = round(float(valeur), 2)
-        else:
-            au_mois = None
+        # Les options (RAM ou disques ajoutes, bande passante, IP
+        # supplementaires, licences...) sont des services a part, rattaches
+        # au serveur : sans elles, le PA est celui de l'offre nue, pas ce
+        # qu'OVH facture. Chacune a sa propre periode.
+        options, sans_prix = [], 0
+        for o in (cli.get_safe("/services/{}/options".format(sid), []) or []):
+            m = _prix_au_mois(o)
+            if m is None:
+                sans_prix += 1
+                continue
+            plan = (o.get("billing") or {}).get("plan") or {}
+            res_o = o.get("resource") or {}
+            options.append({
+                "libelle": (plan.get("invoiceName") or res_o.get("displayName")
+                            or plan.get("code") or res_o.get("name") or "option"),
+                "plan": plan.get("code") or "",
+                "prix_mois": m,
+            })
+        total_options = round(sum(o["prix_mois"] for o in options), 2)
+
+        erreur = None
+        if valeur is None:
+            erreur = "aucun tarif rendu par /services/{}".format(sid)
+        elif sans_prix:
+            erreur = "{} option(s) sans tarif lisible, non comptee(s)".format(sans_prix)
 
         return {
             "ovh_name": nom,
@@ -349,10 +385,14 @@ def fetch_costs(cli, workers):
             "price_value": valeur,
             "price_currency": prix.get("currencyCode"),
             "price_period": periode,
-            "price_month": au_mois,
+            # le cout reel : l'offre et ses options, ramenes au mois
+            "price_month": (round(base + total_options, 2)
+                            if base is not None else None),
+            "base_month": base,
+            "options_month": total_options,
+            "options": options,
             "next_billing": (fac.get("nextBillingDate") or "")[:10] or None,
-            "erreur": None if valeur is not None
-                      else "aucun tarif rendu par /services/{}".format(sid),
+            "erreur": erreur,
         }
 
     with ThreadPoolExecutor(max_workers=workers) as pool:

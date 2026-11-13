@@ -7,5 +7,9 @@ document.getElementById('session-reprendre').onclick = () => location.reload();
 
 // Le volet commercial se charge apres le dessin : la topologie s'affiche
 // sans attendre la base, et s'enrichit quand la reponse arrive.
-chargerMoi();
-chargerCommerce().then(() => chargerVues(prefsRent.vue));
+// L'onglet s'ouvre quand on sait qui est la (onglets d'admin) et si la
+// rentabilite repond (onglet par defaut) ; le schema s'affiche en attendant.
+Promise.all([chargerMoi(), chargerCommerce()]).then(() => {
+  ouvrirOnglet(ongletMemorise());
+  chargerVues(prefsRent.vue);
+});

@@ -877,6 +877,57 @@ class Handler(BaseHTTPRequestHandler):
                          pour_journal(", ".join(hotes)))
         self.repondre(201, {"depose": n, "hotes": hotes})
 
+    # -- comptes locaux : onglet Comptes, admins seulement -------------------
+    # Un mot de passe genere n'est rendu qu'une fois, dans la reponse a
+    # l'admin qui l'a demande ; il n'entre ni au journal ni dans les logs.
+    @route("GET", "/api/comptes", "admin", mode="local")
+    def lister_comptes(self):
+        res, echec = self.lire(auth_locale.lister_comptes)
+        if echec:
+            return
+        self.repondre(200, {"comptes": res, "moi": self.identite(),
+                            "roles": list(auth_locale.ROLES)})
+
+    @route("POST", "/api/comptes", "admin", corps=True, limite=2048, mode="local")
+    def creer_compte(self, charge):
+        par = self.identite()
+        roles = charge.get("roles")
+        mdp, echec = self.lire(lambda c: auth_locale.creer_compte(
+            c, charge.get("login"),
+            ",".join(roles) if isinstance(roles, list) else roles, par))
+        if echec:
+            return
+        login = auth_locale.verifier_login(charge.get("login"))
+        self.log_message("compte local cree : %s par %s",
+                         pour_journal(login), pour_journal(par))
+        self.repondre(201, {"login": login, "mot_de_passe": mdp})
+
+    @route("POST", "/api/comptes/reinitialiser", "admin", corps=True, limite=1024,
+           mode="local")
+    def reinitialiser_compte(self, charge):
+        par = self.identite()
+        mdp, echec = self.lire(lambda c: auth_locale.reinitialiser_compte(
+            c, charge.get("login"), par))
+        if echec:
+            return
+        login = auth_locale.verifier_login(charge.get("login"))
+        self.log_message("compte local reinitialise : %s par %s",
+                         pour_journal(login), pour_journal(par))
+        self.repondre(200, {"login": login, "mot_de_passe": mdp})
+
+    @route("POST", "/api/comptes/modifier", "admin", corps=True, limite=2048,
+           mode="local")
+    def modifier_compte(self, charge):
+        par = self.identite()
+        res, echec = self.lire(lambda c: auth_locale.modifier_compte(
+            c, charge.get("login"), par, roles=charge.get("roles"),
+            actif=charge.get("actif")))
+        if echec:
+            return
+        self.log_message("compte local modifie : %s par %s",
+                         pour_journal(str(charge.get("login"))[:64]), pour_journal(par))
+        self.repondre(200, {"modifie": res})
+
     # -- lectures ------------------------------------------------------------
     @route("GET", "/api/rentabilite", "lecture")
     def rentabilite(self):

@@ -249,6 +249,138 @@ def creer_ou_reinitialiser(conn, login, roles, par):
     return mdp
 
 
+# ---------------------------------------------------------------------------
+# Gestion des comptes depuis la page (onglet Comptes, admins seulement)
+# ---------------------------------------------------------------------------
+
+def _existe(conn, login):
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM compte_local WHERE login = %s", (login,))
+        return cur.fetchone() is not None
+
+
+def lister_comptes(conn):
+    """Les comptes, sans empreinte, avec leurs sessions ouvertes."""
+    maintenant = dt.datetime.now()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT login, roles, actif, doit_changer, echecs, bloque_jusqu_a,"
+                " derniere_connexion, cree_le, cree_par, maj_le FROM compte_local"
+                " ORDER BY login")
+            comptes = cur.fetchall()
+            cur.execute(
+                "SELECT login, COUNT(*) AS n FROM session_locale WHERE revoquee = 0"
+                " AND expire_le > %s GROUP BY login", (maintenant,))
+            ouvertes = {r["login"]: r["n"] for r in cur.fetchall()}
+    except _SQL as exc:
+        raise inventory_db._traduit(exc, "la liste des comptes") from exc
+    rendu = []
+    for c in comptes:
+        bloque = c["bloque_jusqu_a"]
+        rendu.append({
+            "login": c["login"],
+            "roles": [r for r in ROLES if r in lire_roles(c["roles"])],
+            "actif": bool(c["actif"]),
+            "doit_changer": bool(c["doit_changer"]),
+            "bloque_jusqu_a": bloque.isoformat(sep=" ", timespec="minutes")
+            if bloque and bloque > maintenant else None,
+            "derniere_connexion": c["derniere_connexion"].isoformat(
+                sep=" ", timespec="minutes") if c["derniere_connexion"] else None,
+            "cree_le": c["cree_le"].isoformat(sep=" ", timespec="minutes"),
+            "cree_par": c["cree_par"],
+            "sessions": ouvertes.get(c["login"], 0),
+        })
+    return rendu
+
+
+def creer_compte(conn, login, roles, par):
+    """Un compte neuf ; refuse un identifiant deja pris (une reinitialisation
+    se demande explicitement). Rend le mot de passe genere."""
+    login = verifier_login(login)
+    if _existe(conn, login):
+        raise inventory_db.VenteInvalide(
+            "le compte {} existe deja : reinitialise-le plutot".format(login))
+    return creer_ou_reinitialiser(conn, login, roles, par)
+
+
+def reinitialiser_compte(conn, login, par):
+    """Nouveau mot de passe, sessions fermees, compte debloque ; les roles
+    restent. Rend le mot de passe genere."""
+    login = verifier_login(login)
+    with conn.cursor() as cur:
+        cur.execute("SELECT roles FROM compte_local WHERE login = %s", (login,))
+        c = cur.fetchone()
+    if c is None:
+        raise inventory_db.VenteInvalide("compte inconnu : {}".format(login))
+    return creer_ou_reinitialiser(conn, login, c["roles"], par)
+
+
+def modifier_compte(conn, login, par, roles=None, actif=None):
+    """Change les roles ou active / desactive un compte.
+
+    Deux garde-fous : un admin ne se retire ni son role ni son acces (il se
+    fermerait la porte), et il reste toujours un admin actif. Un compte
+    desactive perd ses sessions sur-le-champ.
+    """
+    login = verifier_login(login)
+    nouveaux = None
+    if roles is not None:
+        nouveaux = lire_roles(",".join(roles) if isinstance(roles, list) else roles)
+        if not nouveaux:
+            raise inventory_db.VenteInvalide("au moins un role")
+    if actif is not None and not isinstance(actif, bool):
+        raise inventory_db.VenteInvalide("actif : vrai ou faux")
+    if login == par and ((nouveaux is not None and "admin" not in nouveaux)
+                         or actif is False):
+        raise inventory_db.VenteInvalide(
+            "tu ne peux pas te retirer le role admin ni te desactiver toi-meme")
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM compte_local WHERE login = %s FOR UPDATE",
+                        (login,))
+            avant = cur.fetchone()
+            if avant is None:
+                raise inventory_db.VenteInvalide("compte inconnu : {}".format(login))
+            maj = {}
+            if nouveaux is not None:
+                maj["roles"] = ",".join(r for r in ROLES if r in nouveaux)
+            if actif is not None:
+                maj["actif"] = 1 if actif else 0
+            if not maj:
+                return _public(avant)
+            # il doit rester un admin actif une fois la modification faite
+            restera_admin = ("admin" in lire_roles(maj.get("roles", avant["roles"]))
+                             and maj.get("actif", avant["actif"]))
+            if not restera_admin:
+                cur.execute(
+                    "SELECT COUNT(*) AS n FROM compte_local WHERE actif = 1 AND"
+                    " login <> %s AND FIND_IN_SET('admin', roles) FOR UPDATE",
+                    (login,))
+                if not cur.fetchone()["n"]:
+                    raise inventory_db.VenteInvalide(
+                        "c'est le dernier admin actif : donne d'abord le role "
+                        "admin a un autre compte")
+            maj["maj_le"] = dt.datetime.now()
+            _maj_compte(cur, login, maj)
+            if maj.get("actif") == 0 or ("roles" in maj and login != par):
+                # un compte coupe ou dont les droits changent repart de zero ;
+                # l'admin qui se modifie lui-meme garde sa session
+                cur.execute("UPDATE session_locale SET revoquee = 1 "
+                            "WHERE login = %s AND revoquee = 0", (login,))
+            apres = {k: v for k, v in maj.items() if k != "maj_le"}
+            inventory_db.journaliser(cur, par, "compte local modifie",
+                                     "compte " + login, _public(avant), apres)
+    except inventory_db.VenteInvalide:
+        conn.rollback()
+        raise
+    except _SQL as exc:
+        conn.rollback()
+        raise inventory_db._traduit(exc, "la modification du compte") from exc
+    conn.commit()
+    return apres
+
+
 def connecter(conn, login, mdp, origine):
     """Ouvre une session. Rend (jeton, compte) ; leve Refus sinon."""
     login = (login or "").strip().lower()[:64]

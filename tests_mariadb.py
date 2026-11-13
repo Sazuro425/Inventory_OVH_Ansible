@@ -304,7 +304,12 @@ def _():
         c.close()
     w = service()
     try:
-        refuse_sql(lambda: al.creer_ou_reinitialiser(w, "pirate", "admin", "x"))
+        # un compte se desactive, il ne s'efface pas : pas de DELETE
+        def effacer():
+            with w.cursor() as cur:
+                cur.execute("DELETE FROM compte_local WHERE login = 'admin'")
+        refuse_sql(effacer)
+        w.rollback()
         jeton, compte = al.connecter(w, "admin", mdp, "10.0.0.1")
         egal(compte["doit_changer"], True)
         egal(al.session(w, jeton)["roles"], set(), "aucun role avant changement")
@@ -322,6 +327,58 @@ def _():
             egal(exc.code, 429)
         al.deconnecter(w, jeton, "admin")
         egal(al.session(w, jeton), None, "session fermee")
+    finally:
+        w.close()
+
+
+@test("onglet Comptes : un admin cree, reinitialise, modifie ; garde-fous")
+def _():
+    w = service()
+    try:
+        def refuse(fn, motif):
+            try:
+                fn()
+            except db.VenteInvalide as exc:
+                egal(motif in str(exc), True, "motif : " + str(exc))
+                w.rollback()
+                return
+            raise AssertionError("aurait du etre refuse : " + motif)
+
+        # un seul admin au depart (cree par le test precedent)
+        mdp = al.creer_compte(w, "Lea.Martin", ["lecture"], "admin")
+        egal(len(mdp) >= 20, True, "mot de passe genere")
+        refuse(lambda: al.creer_compte(w, "lea.martin", ["admin"], "admin"),
+               "existe deja")
+        noms = {c["login"]: c for c in al.lister_comptes(w)}
+        egal(noms["lea.martin"]["roles"], ["lecture"])
+        egal("empreinte" in noms["lea.martin"], False, "jamais l'empreinte")
+
+        al.modifier_compte(w, "lea.martin", "admin", roles=["commercial"])
+        egal({c["login"]: c for c in al.lister_comptes(w)}["lea.martin"]["roles"],
+             ["lecture", "commercial"])
+        jeton, _ = al.connecter(w, "lea.martin", mdp, "10.0.0.2")
+        al.modifier_compte(w, "lea.martin", "admin", actif=False)
+        egal(al.session(w, jeton), None, "desactive : session fermee")
+
+        refuse(lambda: al.modifier_compte(w, "admin", "admin", roles=["lecture"]),
+               "toi-meme")
+        refuse(lambda: al.modifier_compte(w, "admin", "admin", actif=False),
+               "toi-meme")
+        # un autre admin ne peut pas retirer le dernier admin actif
+        refuse(lambda: al.modifier_compte(w, "admin", "chef", actif=False),
+               "dernier admin")
+        al.modifier_compte(w, "lea.martin", "admin", roles=["admin"], actif=True)
+        al.modifier_compte(w, "admin", "lea.martin", roles=["commercial"])
+
+        nouveau = al.reinitialiser_compte(w, "lea.martin", "admin")
+        egal(nouveau != mdp, True, "nouveau mot de passe")
+        refuse(lambda: al.reinitialiser_compte(w, "inconnu", "admin"), "inconnu")
+        # remettre l'admin d'origine pour les tests suivants
+        al.modifier_compte(w, "admin", "lea.martin", roles=["admin", "commercial"])
+        actions = [l["action"] for l in db.lire_journal(w, 50)]
+        egal("compte local modifie" in actions and "compte local cree" in actions,
+             True, "au journal")
+        egal(db.verifier_journal(w)["ok"], True, "chaine intacte")
     finally:
         w.close()
 

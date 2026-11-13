@@ -4,7 +4,7 @@
 // les relire. La collecte suivante les ouvre, les teste sur l'hyperviseur,
 // et les range chiffres ou les refuse avec leur motif — que cette vue
 // affiche au passage suivant.
-const droits = { admin: false };
+const droits = { admin: false, locale: false };
 const recolte = { data: null };
 
 async function chargerRecolte() {
@@ -96,9 +96,11 @@ const trierRecolte = hotes => [...hotes].sort((a, b) =>
   || ((joursRestants(a) ?? Infinity) - (joursRestants(b) ?? Infinity))
   || a.hote.localeCompare(b.hote, 'fr', { numeric: true }));
 
-async function afficherRecolte() {
-  const corps = ouvrirTiroir('Récolte PVE', 'jetons par hyperviseur');
+// la liste des hyperviseurs et de leurs jetons, dans l'onglet Jetons PVE
+async function dessinerJetons() {
+  const corps = document.getElementById('jetons-corps');
   await chargerRecolte();
+  corps.replaceChildren();
   const d = recolte.data;
   if (!d) {
     corps.appendChild(el('p', { className: 'msg ko', textContent: 'état de la récolte illisible' }));
@@ -121,24 +123,31 @@ async function afficherRecolte() {
     corps.appendChild(el('p', { className: 'msg ko', textContent:
       'pve.jetons_deposes est désactivé dans infra.yml : un jeton accepté ne servira pas.' }));
   }
-  const ul = el('ul', { className: 'liste-recolte' });
-  for (const h of trierRecolte(actifs)) {
+  // un tableau : a pleine page, une ligne par hyperviseur, le motif d'un
+  // refus ou d'une panne en clair plutot que dans une infobulle
+  const tete = el('tr', null, ...['Hyperviseur', 'Cluster', 'État', 'Jeton', 'Détail', '']
+    .map(t => el('th', { textContent: t })));
+  const lignes = trierRecolte(actifs).map(h => {
     const e = etatRecolte(h), j = sourceJeton(h);
-    const li = el('li', null,
-      el('span', { className: 'nom', textContent: h.hote,
-                   title: [h.hote, h.cluster && 'cluster ' + h.cluster, h.erreur, j.texte]
-                     .filter(Boolean).join('\n') }),
-      el('span', { className: 'etat-recolte ' + e.classe, textContent: e.texte }),
-      j.badge ? el('span', { className: 'etat-recolte ' + j.classe, textContent: j.badge })
-              : null);
-    if (d.pret) li.appendChild(el('button', { textContent: 'Déposer',
-                                              onclick: () => formDepot([h.hote]) }));
-    ul.appendChild(li);
-  }
-  corps.appendChild(ul);
+    const detail = h.joignable ? j.texte : (h.erreur || j.texte);
+    return el('tr', null,
+      el('td', null, el('b', { textContent: h.hote }),
+         h.ovh_name && h.ovh_name !== h.hote
+           ? el('small', { className: 'lecture', textContent: ' ' + h.ovh_name }) : null),
+      el('td', { textContent: h.cluster || '—' }),
+      el('td', null, el('span', { className: 'etat-recolte ' + e.classe, textContent: e.texte })),
+      el('td', null, j.badge ? el('span', { className: 'etat-recolte ' + j.classe,
+                                            textContent: j.badge }) : '—'),
+      el('td', { className: 'detail-jeton', textContent: detail, title: detail }),
+      el('td', { className: 'actions-compte' }, d.pret
+        ? el('button', { textContent: 'Déposer', onclick: () => formDepot([h.hote]) }) : null));
+  });
+  corps.appendChild(el('table', { className: 'comptes jetons' },
+    el('thead', null, tete), el('tbody', null, ...lignes)));
   if (d.pret) {
-    corps.appendChild(el('div', { className: 'actions' },
-      el('button', { textContent: 'Déposer pour plusieurs…', onclick: () => formDepot([]) })));
+    corps.prepend(el('div', { className: 'actions' },
+      el('button', { className: 'primaire', textContent: 'Déposer un jeton…',
+                     onclick: () => formDepot([]) })));
   }
 }
 
@@ -236,6 +245,7 @@ function formDepot(choisis) {
       await poster('/api/recolte/jeton', { hotes, jeton, expire_le: echeance.value });
       secret.value = '';
       await chargerRecolte();
+      if (onglet.courant === 'jetons') dessinerJetons();
     }, 'Jeton scellé pour ' + hotes.length + ' hyperviseur(s). Il sera testé à la '
        + 'prochaine collecte : pour ne pas attendre, systemctl start '
        + 'inventaire-collecte.service sur la VM.');
@@ -244,5 +254,4 @@ function formDepot(choisis) {
   secret.focus();
 }
 
-document.getElementById('btn-recolte').onclick = afficherRecolte;
 

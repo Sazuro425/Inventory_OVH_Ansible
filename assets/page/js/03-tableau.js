@@ -76,6 +76,37 @@ const COLONNES_PLAT = [
     val: r => r.c.alertes.join(' ; ') },
 ];
 
+// Les colonnes de l'arbre. Les cinq d'origine (defaut) gardent leur rendu
+// propre : corrections signalees, ROI colore, jauge de capacite. Les autres
+// reprennent une colonne du tableau : la valeur est celle de la carte quand
+// elle a un sens a son niveau, un tiret sinon.
+const colArbre = (id, titre, cellule, extra) =>
+  Object.assign({ id, titre, cellule }, extra || {});
+const depuisPlat = id => {
+  const k = COLONNES_PLAT.find(x => x.id === id);
+  return colArbre(id, k.titre, c => {
+    const v = k.niv.includes(c.type) || k.niv.includes('tout')
+      ? k.val({ c, nbVm: compterVm(c) }) : null;
+    return el('td', { className: k.num ? 'num' : 'doux', textContent: formatCellule(k, v) });
+  }, { num: k.num });
+};
+// compterVm : 05-filtres-vues.js
+const COLONNES_ARBRE = [
+  colArbre('pa', 'PA / mois', c => celluleMontant(c, 'pa'), { num: true, defaut: true }),
+  colArbre('pv', 'CA / mois', c => celluleMontant(c, 'pv'), { num: true, defaut: true }),
+  colArbre('roi', 'ROI / mois', c => el('td', { className: 'num marge ' + classeMarge(c.roi),
+                                                textContent: signe(c.roi) }),
+           { num: true, defaut: true }),
+  colArbre('marge', 'Marge', c => el('td', { className: 'num doux',
+    textContent: c.pv ? Math.round(100 * c.roi / c.pv) + ' %' : '—' }), { num: true, defaut: true }),
+  colArbre('capa', 'Capacité', c => el('td', null,
+    (c.type === 'cluster' || c.type === 'serveur') ? jauge(c.capacite) : el('span')),
+    { defaut: true }),
+  ...['pa_auto', 'nb_vm', 'ram_pct', 'ram_libre', 'vcpu_ratio', 'role', 'offre', 'dc',
+      'noeud', 'statut', 'vcpu', 'ram', 'client', 'contrat', 'corr', 'alertes']
+    .map(depuisPlat),
+];
+
 const plat = {
   niveau: 'serveur', tri: null, sens: 1,   // tri null : ordre de l'arbre
   colonnes: {},                            // niveau -> [id], choix de la vue
@@ -110,26 +141,34 @@ function lignesPlat() {
   return lignes;
 }
 
-const colonnesDefaut = niveau => COLONNES_PLAT.filter(k => k.niv.includes(niveau));
+// Le catalogue d'un niveau, et ce qu'il affiche sans choix : pour le
+// tableau, tout ce qui s'applique au niveau ; pour l'arbre (niveau
+// 'arbre', 02-rentabilite.js), ses cinq colonnes d'origine.
+const catalogueColonnes = niveau => niveau === 'arbre' ? COLONNES_ARBRE
+  : COLONNES_PLAT.filter(k => k.niv.includes(niveau));
+const colonnesDefaut = niveau => niveau === 'arbre'
+  ? COLONNES_ARBRE.filter(k => k.defaut) : catalogueColonnes(niveau);
 
 // Les colonnes du niveau, dans l'ordre choisi par la vue ; une colonne
 // inconnue (vue d'une version plus recente) est ignoree, pas une erreur.
-function colonnesNiveau() {
-  const dispo = colonnesDefaut(plat.niveau);
-  const choix = plat.colonnes[plat.niveau];
-  if (!choix) return dispo;
-  const parId = new Map(dispo.map(k => [k.id, k]));
+function colonnesNiveau(niveau = plat.niveau) {
+  const choix = plat.colonnes[niveau];
+  if (!choix) return colonnesDefaut(niveau);
+  const parId = new Map(catalogueColonnes(niveau).map(k => [k.id, k]));
   const cols = choix.map(id => parId.get(id)).filter(Boolean);
-  return cols.length ? cols : dispo;
+  return cols.length ? cols : colonnesDefaut(niveau);
 }
 
 // Choisir et ordonner les colonnes du niveau affiche. Le nom reste : sans
 // lui, une ligne ne se reconnait plus.
-function formColonnes() {
-  const niveau = plat.niveau;
-  const corps = ouvrirTiroir('Colonnes', 'niveau ' + (NIVEAUX.find(n => n[0] === niveau) || [, niveau])[1]);
-  const vues = new Set(colonnesNiveau().map(k => k.id));
-  const ordre = [...colonnesNiveau(), ...colonnesDefaut(niveau).filter(k => !vues.has(k.id))]
+function formColonnes(niveau = plat.niveau) {
+  const arbre = niveau === 'arbre';
+  const reafficher = () => (arbre ? dessinerRent() : dessinerPlat());
+  const corps = ouvrirTiroir('Colonnes', arbre ? 'vue arbre'
+    : 'niveau ' + (NIVEAUX.find(n => n[0] === niveau) || [, niveau])[1]);
+  const vues = new Set(colonnesNiveau(niveau).map(k => k.id));
+  const ordre = [...colonnesNiveau(niveau),
+                 ...catalogueColonnes(niveau).filter(k => !vues.has(k.id))]
     .map(k => ({ k, ok: vues.has(k.id) }));
   const f = el('form', { className: 'saisie' });
   const liste = el('ul', { className: 'liste-colonnes' });
@@ -156,18 +195,19 @@ function formColonnes() {
     el('button', { type: 'button', textContent: 'Par défaut', onclick: () => {
       delete plat.colonnes[niveau];
       fermerTiroir();
-      dessinerPlat();
+      reafficher();
     } }),
     el('button', { type: 'button', textContent: 'Annuler', onclick: fermerTiroir })));
   f.onsubmit = ev => {
     ev.preventDefault();
     const ids = ordre.filter(x => x.ok).map(x => x.k.id);
     const defaut = colonnesDefaut(niveau).map(k => k.id);
+    if (!ids.length) { message(f, 'garde au moins une colonne', false); return; }
     if (JSON.stringify(ids) === JSON.stringify(defaut)) delete plat.colonnes[niveau];
     else plat.colonnes[niveau] = ids;
-    if (plat.tri && !ids.includes(plat.tri)) plat.tri = null;
+    if (!arbre && plat.tri && !ids.includes(plat.tri)) plat.tri = null;
     fermerTiroir();
-    dessinerPlat();
+    reafficher();
     flash('Colonnes appliquées. Enregistre la vue pour les garder.');
   };
   corps.appendChild(f);
@@ -318,7 +358,8 @@ document.querySelectorAll('#rent-niveaux button').forEach(b => {
   };
 });
 document.getElementById('rent-export-vue').onclick = exporterVue;
-document.getElementById('plat-colonnes').onclick = formColonnes;
+document.getElementById('plat-colonnes').onclick = () => formColonnes();
+document.getElementById('arbre-colonnes').onclick = () => formColonnes('arbre');
 document.body.classList.toggle('mode-plat', vueRent.mode === 'tableau');
 document.body.classList.toggle('mode-graph', vueRent.mode === 'graphiques');
 document.querySelectorAll('#rent-modes button').forEach(b =>

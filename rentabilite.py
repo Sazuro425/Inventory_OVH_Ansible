@@ -233,7 +233,14 @@ def calculer(data, ventes=(), elements=(), surcharges=(), roles=(),
             "noeud": None if injoignable else probe.get("node"),
             "cluster_pve": pve,
             "joignable": not injoignable,
+            # le PA OVH detaille : l'offre, puis chaque option facturee
+            "pa_offre": _num(cout.get("base_month")),
+            "pa_options": _num(cout.get("options_month")),
+            "options": cout.get("options") or [],
         }
+        if cout.get("erreur") and auto is not None:
+            # un tarif est la, mais incomplet (option sans prix lisible)
+            c["alertes"].append(cout["erreur"])
         c["_phys"] = None if injoignable else {
             "vcpu": _num(hw.get("cpu_logical")) or _num(srv.get("cpu_threads")),
             "ram_mb": _num(hw.get("ram_total_mb")) or _num(srv.get("ram_mb")),

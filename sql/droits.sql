@@ -66,10 +66,12 @@ GRANT SELECT, INSERT, UPDATE ON inventory.role_carte
   TO 'inventory_web'@'localhost';
 
 -- Comptes locaux : le service verifie un mot de passe, compte les echecs,
--- enregistre un changement (SELECT, UPDATE). Il ne cree aucun compte : pas
--- d'INSERT, c'est inventory_cli.py --compte-local, sous le compte de
--- collecte, qui le fait. Les sessions, elles, naissent ici.
-GRANT SELECT, UPDATE ON inventory.compte_local
+-- enregistre un changement (SELECT, UPDATE), et un admin cree les comptes
+-- depuis l'onglet Comptes (INSERT). L'INSERT n'elargit pas ce que le
+-- service pouvait deja : avec UPDATE, il reecrivait deja l'empreinte et les
+-- roles de n'importe quel compte. Toujours pas de DELETE : un compte se
+-- desactive, il ne disparait pas du journal. Les sessions naissent ici.
+GRANT SELECT, INSERT, UPDATE ON inventory.compte_local
   TO 'inventory_web'@'localhost';
 GRANT SELECT, INSERT, UPDATE ON inventory.session_locale
   TO 'inventory_web'@'localhost';
@@ -140,9 +142,10 @@ SELECT grantee, table_name, privilege_type
 
 -- ---------------------------------------------------------------------------
 -- Verification : les tables en ecriture doivent etre exactement
---   client_token, commercial, element, role, role_carte,
---   session_locale, surcharge, vue_rentabilite      INSERT,UPDATE
---   compte_local, journal_tete                      UPDATE
+--   client_token, commercial, compte_local, element, role,
+--   role_carte, session_locale, surcharge,
+--   vue_rentabilite                                 INSERT,UPDATE
+--   journal_tete                                    UPDATE
 --   depot_jeton, journal_saisie                     INSERT
 -- ---------------------------------------------------------------------------
 

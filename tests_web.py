@@ -207,6 +207,21 @@ def _():
     egal(appel("POST", "/api/token", lecteur)[0], 403, "jeton sans admin")
 
 
+@test("onglet Comptes : routes du mode local, admins seulement")
+def _():
+    # en OIDC, les comptes sont ceux d'Authentik : les routes n'existent pas
+    for methode, chemin in (("GET", "/api/comptes"), ("POST", "/api/comptes"),
+                            ("POST", "/api/comptes/reinitialiser"),
+                            ("POST", "/api/comptes/modifier")):
+        egal(appel(methode, chemin)[0], 404, chemin + " en OIDC")
+    # et chacune exige le role admin, en mode local
+    for methode, chemin in (("GET", "/api/comptes"), ("POST", "/api/comptes"),
+                            ("POST", "/api/comptes/reinitialiser"),
+                            ("POST", "/api/comptes/modifier")):
+        r = web.ROUTES[(methode, chemin)]
+        egal((r.acces, r.mode), ("admin", "local"), chemin)
+
+
 @test("aiguilleur : un corps qui n'est pas du JSON est refuse (400)")
 def _():
     commercial = {"X-Remote-User": "bob", "X-Remote-Groups": "inventaire-commercial",

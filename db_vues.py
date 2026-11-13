@@ -23,7 +23,7 @@ from db_base import (
 # ---------------------------------------------------------------------------
 
 MODES_VUE = ("arbre", "tableau", "graphiques")
-NIVEAUX_VUE = ("cluster", "serveur", "vm", "element", "tout")
+NIVEAUX_VUE = ("cluster", "serveur", "vm", "element", "tout", "arbre")
 LISTES_VUE = ("clusters", "datacenters", "clients", "roles")
 
 # Tableau de bord : les colonnes du tableau, niveau par niveau, et les

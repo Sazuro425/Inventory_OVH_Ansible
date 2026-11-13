@@ -545,6 +545,47 @@ def _():
          "nom sur une ligne, point-virgule protege")
 
 
+@test("cout OVH : l'offre et ses options, chacune ramenee au mois")
+def _():
+    import ovh_inventory
+
+    def svc(prix, duree, plan="", route=None):
+        s = {"billing": {"pricing": {"price": {"value": prix, "currencyCode": "EUR"},
+                                     "duration": duree},
+                         "plan": {"code": plan, "invoiceName": plan.upper()}}}
+        if route:
+            s["route"] = {"path": "/dedicated/server/{serviceName}",
+                          "vars": [{"key": "serviceName", "value": route}]}
+        return s
+
+    reponses = {
+        "/services?routes=/dedicated/server": [11],
+        "/services/11": svc(120.0, "P1M", "advance-2", route="ns1.ovh.net"),
+        "/services/11/options": [svc(240.0, "P1Y", "ram-64g"),   # 20 / mois
+                                 svc(5.0, "P1M", "ip-failover"),
+                                 svc(None, "P1M", "bande-passante")],
+    }
+
+    class Faux:
+        def get_safe(self, chemin, defaut=None):
+            return reponses.get(chemin, defaut)
+
+    c = ovh_inventory.fetch_costs(Faux(), 1)["ns1.ovh.net"]
+    egal(c["base_month"], 120.0, "offre")
+    egal(c["options_month"], 25.0, "options")
+    egal(c["price_month"], 145.0, "total facture")
+    egal([o["plan"] for o in c["options"]], ["ram-64g", "ip-failover"])
+    egal("1 option(s) sans tarif" in (c["erreur"] or ""), True, "option sans prix signalee")
+
+    # le total passe dans le PA du serveur, le detail dans ses infos
+    data = {"servers": [serveur(1)], "probes": [sonde(1, "prod", "pve-1")],
+            "guests": [], "costs": [c]}
+    s = R.calculer(data)["arbre"][0]["enfants"][0]
+    egal(s["type"], "serveur")
+    egal(s["pa_propre"], 145.0, "PA du serveur")
+    egal(s["infos"]["pa_options"], 25.0, "detail des options")
+
+
 # --------------------------------------------------------------------------
 
 def main():

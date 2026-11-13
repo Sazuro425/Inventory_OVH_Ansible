@@ -338,14 +338,15 @@ page publiee : /var/www/inventaire/index.html
 > `cles API manquantes` = l'étape 8 n'est pas faite.
 
 Recharge la page dans ton navigateur (`F5`). **Tu dois voir** la carte, avec
-tes serveurs OVH, et un bouton **Récolte** en haut.
+tes serveurs OVH, et en haut les onglets **Rentabilité**, **Schéma**,
+**Jetons PVE** et **Comptes**.
 
 ## Étape 10 — Créer le compte de lecture sur chaque cluster Proxmox
 
 À faire **sur un seul nœud par cluster**, en root. Le compte et le jeton
 valent pour tout le cluster.
 
-1. Dans la page, clique **Récolte**, puis **Déposer pour plusieurs…**.
+1. Dans la page, ouvre l'onglet **Jetons PVE**, puis clique **Déposer un jeton…**.
 2. Ouvre *« Créer le compte de récolte sur l'hyperviseur »*, puis clique
    **Copier les commandes**.
 3. Connecte-toi en root (SSH ou Shell de l'interface Proxmox) sur **un** nœud du
@@ -405,7 +406,7 @@ journalctl -u inventaire-collecte.service -n 30 --no-pager -o cat
 Cette fois, la collecte teste chaque jeton déposé, puis interroge les
 hyperviseurs. Compte quelques minutes pour 30 clusters.
 
-Recharge la page, puis clique **Récolte**. **Tu dois voir** les hyperviseurs
+Recharge la page, puis ouvre l'onglet **Jetons PVE**. **Tu dois voir** les hyperviseurs
 **joignables**, avec leur jeton et son échéance.
 
 > Un hyperviseur reste injoignable ? Son motif est affiché à côté de lui dans
@@ -464,15 +465,25 @@ tail -n 30 /var/log/apache2/inventaire-error.log
 
 Toutes sur la VM, en root, depuis `/opt/inventaire-infra`.
 
-**Créer un compte pour un collègue.**
-- en lecture seule : `bash deploy/inventory.sh --compte-local prenom --roles lecture`
-- commercial (lecture et saisie des ventes) : `bash deploy/inventory.sh --compte-local prenom --roles commercial`
+**Créer un compte pour un collègue** : onglet **Comptes** de la page (admins
+seulement). Saisis son identifiant (`prenom.nom`), coche ses rôles, clique
+**Créer le compte**. Le mot de passe s'affiche une fois, en haut de l'onglet :
+transmets-le de vive voix ou par le gestionnaire de mots de passe. Il le
+change à sa première connexion.
 
-Le mot de passe s'affiche une fois, à lui transmettre de vive voix ou par le
-gestionnaire de mots de passe. Il le change à sa première connexion.
+| Rôle | Ce qu'il permet |
+|---|---|
+| Lecture | tout voir, rien saisir |
+| Commercial | saisir ventes, enfants, corrections |
+| Admin | en plus : jetons PVE, comptes, journal |
 
-**Réinitialiser un mot de passe oublié** : la même commande, avec le même
-identifiant.
+**Mot de passe oublié, compte à couper, rôles à changer** : même onglet,
+boutons **Nouveau mot de passe**, **Désactiver**, **Rôles…** sur la ligne du
+compte. Un admin ne peut ni se désactiver ni se retirer le rôle admin, et il
+reste toujours au moins un admin actif.
+
+Si plus aucun admin ne peut se connecter : sur la VM,
+`bash deploy/inventory.sh --compte-local admin` (nouveau mot de passe).
 
 **Changer les clés OVH** (expiration, fuite) : `bash deploy/poser-secret.sh ovh`
 

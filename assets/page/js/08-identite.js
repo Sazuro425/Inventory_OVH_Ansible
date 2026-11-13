@@ -32,7 +32,8 @@ async function chargerMoi() {
     zone.hidden = false;
     document.getElementById('btn-jeton').hidden = !m.peut_emettre_jeton;
     droits.admin = m.roles.includes('admin');
-    document.getElementById('btn-recolte').hidden = !droits.admin;
+    droits.locale = !!m.locale;
+    majOnglets();
     if (droits.admin) chargerRecolte();
   } catch (e) { /* page ouverte sans son service : rien a montrer */ }
 }

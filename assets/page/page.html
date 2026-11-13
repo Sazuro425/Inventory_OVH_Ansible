@@ -15,15 +15,20 @@ __STYLE__
   <div class="marque">__TITRE__<small id="horodatage">—</small></div>
   <div class="stats" id="stats"></div>
   <div class="stats" id="stats-commerce"></div>
+  <nav class="segment onglets" id="onglets" aria-label="Vues">
+    <button id="btn-rent" data-onglet="rent" hidden
+            title="PA, CA, ROI et capacité, du cluster à l'élément déclaré">Rentabilité</button>
+    <button data-onglet="schema" title="Le parc dessiné : datacenters, serveurs, hyperviseurs, VM">Schéma</button>
+    <button data-onglet="jetons" hidden title="Déposer les jetons de récolte des hyperviseurs">Jetons PVE</button>
+    <button data-onglet="comptes" hidden title="Créer et gérer les comptes de connexion">Comptes</button>
+  </nav>
   <div class="outils pousse">
-    <button id="btn-rent" hidden title="PA, CA, ROI et capacité, du cluster à l'élément déclaré">Rentabilité</button>
     <input type="search" id="recherche" placeholder="Rechercher…" autocomplete="off">
     <button id="btn-filtres" title="Afficher ou masquer les filtres">Filtres</button>
     <button id="btn-plier" title="Replier tous les hyperviseurs">Replier</button>
     <button id="btn-ajuster" title="Ajuster à l'écran">Ajuster</button>
     <button id="btn-reinit" title="Réinitialiser positions et filtres">Réinitialiser</button>
     <button id="btn-jeton" title="Obtenir un jeton pour le client">Jeton</button>
-    <button id="btn-recolte" hidden title="Jetons PVE de la récolte, hyperviseur par hyperviseur">Récolte</button>
     <button id="btn-theme" title="Thème clair ou sombre">◐</button>
     <div class="moi" id="moi" hidden></div>
   </div>
@@ -91,6 +96,8 @@ __STYLE__
     <label class="puce seul-filtre"><input type="checkbox" id="rent-alertes"> avec alerte</label>
     <button id="rent-btn-filtres" title="Clusters, datacenters, clients, rôles">Filtres</button>
     <button id="rent-deplier" class="seul-arbre">Tout déplier</button>
+    <button id="arbre-colonnes" class="seul-arbre"
+            title="Choisir et ordonner les colonnes de l'arbre">Colonnes…</button>
     <button id="rent-personnaliser" class="seul-graph"
             title="Ajouter, retirer, disposer les panneaux de cette vue">Personnaliser</button>
     <button id="rent-defaut-panneaux" class="seul-graph" hidden
@@ -117,11 +124,7 @@ __STYLE__
   <div class="rent-avert" id="rent-avert"></div>
   <div class="table-defile seul-arbre">
     <table class="arbre">
-      <thead><tr>
-        <th>Carte</th><th class="num">PA / mois</th><th class="num">CA / mois</th>
-        <th class="num">ROI / mois</th><th class="num">Marge</th>
-        <th>Capacité</th><th></th>
-      </tr></thead>
+      <thead id="arbre-tete"></thead>
       <tbody id="rent-corps"></tbody>
     </table>
   </div>
@@ -141,6 +144,21 @@ __STYLE__
     photo : dans un cluster, les VM migrent d’un nœud à l’autre ; celui du
     cluster est le chiffre stable.
   </p>
+</section>
+<section class="page-onglet" id="vue-jetons" aria-label="Jetons PVE">
+  <h2>Jetons PVE</h2>
+  <p class="lecture">Un jeton par cluster suffit : il vaut pour tous ses nœuds.
+    Pour chaque cluster, crée le compte de récolte sur un nœud (les commandes
+    sont dans le formulaire), puis dépose la valeur du jeton ici. La collecte
+    suivante le teste, puis le range chiffré ou le refuse avec son motif.</p>
+  <div id="jetons-corps"></div>
+</section>
+<section class="page-onglet" id="vue-comptes" aria-label="Comptes">
+  <h2>Comptes</h2>
+  <p class="lecture">Les comptes de connexion à cette page. Un mot de passe
+    généré ne s'affiche qu'une fois : transmets-le, il sera changé à la
+    première connexion. Un compte se désactive, il ne s'efface pas.</p>
+  <div id="comptes-corps"></div>
 </section>
 <!-- le tiroir de saisie sert aux deux vues : la fiche d'un hyperviseur
      dans le schema l'ouvre aussi, il ne vit donc pas dans #vue-rent -->

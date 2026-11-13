@@ -6,6 +6,7 @@ lit le dernier. Et le menage : vieux runs, jetons clients perimes.
 from __future__ import annotations
 
 import datetime as dt
+import json
 
 from db_base import (
     _date_or_none,
@@ -87,13 +88,18 @@ def store_run(conn, data, status=None, message=None, _deja_tente=False):
             cur.executemany(
                 "INSERT INTO server_cost (run_id, ovh_name, service_id, "
                 "price_value, price_currency, price_period, price_month, "
+                "base_month, options_month, options_json, "
                 "next_billing, erreur) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 [(run_id, c.get("ovh_name"), c.get("service_id"),
                   _num_or_none(c.get("price_value")),
                   c.get("price_currency") or None,
                   c.get("price_period") or None,
                   _num_or_none(c.get("price_month")),
+                  _num_or_none(c.get("base_month")),
+                  _num_or_none(c.get("options_month")),
+                  json.dumps(c["options"], ensure_ascii=False)
+                  if c.get("options") else None,
                   _date_or_none(c.get("next_billing")),
                   c.get("erreur") or None) for c in couts])
     except pymysql.Error as exc:
@@ -168,6 +174,13 @@ def load_latest(conn):
                 "price_period": r["price_period"] or "",
                 "price_month": float(r["price_month"])
                     if r["price_month"] is not None else None,
+                # le detail des options (migration 0006) ; absent avant elle
+                "base_month": float(r["base_month"])
+                    if r.get("base_month") is not None else None,
+                "options_month": float(r["options_month"])
+                    if r.get("options_month") is not None else None,
+                "options": json.loads(r["options_json"])
+                    if r.get("options_json") else [],
                 "next_billing": r["next_billing"].isoformat()
                     if r["next_billing"] else "",
                 "erreur": r["erreur"] or "",

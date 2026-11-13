@@ -224,16 +224,56 @@
   button.danger { color:var(--rouge); }
   button.danger:hover { border-color:var(--rouge); }
   button[hidden] { display:none; }
+  button:disabled, button:disabled:hover { opacity:.4; cursor:not-allowed;
+                                         background:var(--carte); border-color:var(--trait); }
 
   /* ---------- vue rentabilite ---------- */
   /* une vue a part entiere plutot qu'un volet : l'arbre du parc avec ses
      montants se lit comme un tableau, pas comme un schema */
-  body.mode-rent .scene, body.mode-rent .filtres { display:none; }
-  /* les outils du schema n'agissent pas sur l'arbre : les montrer ici
-     ferait croire que Rechercher filtre le tableau */
-  body.mode-rent #recherche, body.mode-rent #btn-filtres,
-  body.mode-rent #btn-plier, body.mode-rent #btn-ajuster,
-  body.mode-rent #btn-reinit, body.mode-rent #stats { display:none; }
+  body.hors-schema .scene, body.hors-schema .filtres { display:none; }
+  /* les outils du schema n'agissent que sur lui : les montrer ailleurs
+     ferait croire que Rechercher filtre l'arbre */
+  body.hors-schema #recherche, body.hors-schema #btn-filtres,
+  body.hors-schema #btn-plier, body.hors-schema #btn-ajuster,
+  body.hors-schema #btn-reinit, body.hors-schema #stats { display:none; }
+  body.mode-jetons #stats-commerce, body.mode-comptes #stats-commerce { display:none; }
+
+  /* ---------- onglets ---------- */
+  .onglets button { font-weight:500; }
+  .page-onglet { display:none; flex:1 1 auto; overflow:auto; padding:16px 20px 40px;
+                 background:var(--fond); }
+  body.mode-jetons #vue-jetons, body.mode-comptes #vue-comptes { display:block; }
+  .page-onglet > h2 { font-size:17px; margin:0 0 6px; }
+  .page-onglet > p.lecture { max-width:760px; margin:0 0 14px; }
+  .page-onglet .liste-recolte { max-width:980px; }
+
+  /* comptes */
+  table.comptes { border-collapse:collapse; width:100%; max-width:1100px; font-size:12.5px; }
+  table.comptes th, table.comptes td { text-align:left; padding:7px 10px;
+    border-bottom:1px solid var(--trait); vertical-align:middle; }
+  table.comptes th { font-size:10.5px; color:var(--doux); font-weight:600;
+                     text-transform:uppercase; letter-spacing:.05em; }
+  table.comptes tr.inactif td { opacity:.55; }
+  table.jetons td.detail-jeton { color:var(--doux); max-width:480px; overflow:hidden;
+                                 text-overflow:ellipsis; white-space:nowrap; }
+  table.comptes { margin-top:10px; }
+  table.comptes td.actions-compte { white-space:nowrap; text-align:right; }
+  table.comptes td.actions-compte button { margin-left:4px; }
+  .puce-role { display:inline-block; font-size:11px; padding:1px 7px; margin-right:4px;
+               border:1px solid var(--trait2); border-radius:9px; color:var(--texte); }
+  .mdp-genere { max-width:760px; margin:0 0 16px; padding:12px 14px;
+                border:1px solid var(--accent); border-radius:var(--r);
+                background:var(--accent-doux); }
+  .mdp-genere code { font-size:15px; font-weight:600; user-select:all;
+                     padding:2px 6px; background:var(--carte); border-radius:5px; }
+  .mdp-genere .actions { margin-top:8px; display:flex; gap:6px; }
+  form.nouveau-compte { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;
+                        margin:18px 0 0; max-width:1100px; }
+  form.nouveau-compte label.champ { display:flex; flex-direction:column; gap:3px;
+                                    font-size:11.5px; color:var(--doux); }
+  form.nouveau-compte input[type=text] { font:inherit; font-size:12.5px; color:var(--texte);
+    background:var(--carte); border:1px solid var(--trait); border-radius:7px;
+    padding:5px 10px; min-width:200px; }
   .rent { display:none; flex:1 1 auto; overflow:auto; padding:16px 20px 40px;
           background:var(--fond); }
   body.mode-rent .rent { display:block; }

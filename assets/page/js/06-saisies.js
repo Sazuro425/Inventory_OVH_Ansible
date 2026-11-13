@@ -420,7 +420,7 @@ async function afficherJournal() {
   }
 }
 
-document.getElementById('btn-rent').onclick = () => basculerRent(!vueRent.actif);
+// les boutons d'onglet, dont Rentabilite, sont branches dans 09b-onglets.js
 document.getElementById('rent-recherche').oninput = ev => {
   vueRent.filtre = ev.target.value.trim().toLowerCase();
   apresFiltre();
